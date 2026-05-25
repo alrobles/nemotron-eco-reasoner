@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Training outputs
+checkpoints/
+logs/
+*.safetensors
+*.bin
+
+# Data (large)
+data/train.csv
+data/*.jsonl
+data/*.parquet
+
+# Kaggle
+submission.zip
+
+# WandB
+wandb/
+
+# IDE
+.idea/
+.vscode/
