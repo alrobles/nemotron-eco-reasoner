@@ -25,7 +25,7 @@ DATASET_DIR="/home/a474r867/scratch/nemotron-eco-reasoner/data"
 # ── Step 1: Build venv on local SSD ────────────────────────────
 TTMP="/tmp/nemotron_venv_$$"
 echo "=== Step 1: Creating venv on $TTMP ==="
-python3 -m venv --without-pip "$TTMP"
+python3.11 -m venv --without-pip "$TTMP"
 curl -sS https://bootstrap.pypa.io/get-pip.py -o "$TTMP/get-pip.py"
 "$TTMP/bin/python3" "$TTMP/get-pip.py" --quiet
 PIP="$TTMP/bin/pip"
