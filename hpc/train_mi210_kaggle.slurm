@@ -1,101 +1,83 @@
 #!/bin/bash
-#SBATCH --job-name=nemotron-kaggle
-#SBATCH --partition=gpu
+#SBATCH --job-name=nem-dora
+#SBATCH --partition=sixhour
+#SBATCH --account=crcreuman
 #SBATCH --gres=gpu:mi210:1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
-#SBATCH --time=08:00:00
-#SBATCH --output=logs/nemotron_kaggle_%j.out
-#SBATCH --error=logs/nemotron_kaggle_%j.err
+#SBATCH --time=06:00:00
+#SBATCH --output=/home/a474r867/scratch/nemotron-eco-reasoner/logs/nem_dora_%j.out
+#SBATCH --error=/home/a474r867/scratch/nemotron-eco-reasoner/logs/nem_dora_%j.err
 #SBATCH --signal=B:SIGUSR1@300
 
-# Nemotron-3-Nano-30B BF16 DoRA training — single MI210 64GB (ROCm)
-#
-# DoRA (Weight-Decomposed LoRA) — +3-4% reasoning vs standard LoRA.
-# No quantization — pure BF16, no bitsandbytes.
-# MoE: 30B total params, ~3B active. BF16 + rank-32 DoRA ~22 GB VRAM.
-#
-# Key changes from old QLoRA approach:
-#   - No bitsandbytes — pure BF16 DoRA
-#   - Kaggle + ecology mixed dataset
-#   - Uses chat template formatting
+# Nemotron-3-Nano-30B BF16 DoRA — single MI210 64GB (ROCm)
+# All pip installs in /tmp SSD, not Lustre.
+# DoRA rank=32, BF16, Kaggle 5K (M1 proof of concept).
 
 set -euo pipefail
 
-PROJECT_DIR="$HOME/nemotron-eco-reasoner"
-DATASET_DIR="$PROJECT_DIR/data"
-OUTPUT_DIR="$HOME/scratch/nemotron-training/$(date +%Y%m%d_%H%M)"
-KAGGLE_CSV="$DATASET_DIR/train.csv"
+PROJECT_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full"
+MODEL_DIR="/home/a474r867/scratch/nemotron-model"
+SCRIPTS_DIR="$PROJECT_DIR/scripts"
+DATASET_JSONL="$PROJECT_DIR/data/kaggle_5k_train.jsonl"
+OUTPUT_DIR="/home/a474r867/scratch/nemotron-training/nem_dora_$(date +%Y%m%d_%H%M)"
+LOGS_DIR="/home/a474r867/scratch/nemotron-eco-reasoner/logs"
 
-mkdir -p "$DATASET_DIR" "$OUTPUT_DIR" logs
+mkdir -p "$OUTPUT_DIR" "$LOGS_DIR"
 
-# ── Environment ────────────────────────────────────────────────────
-export NEMOTRON_BASE_MODEL="nvidia/Nemotron-3-Nano-30B-A3B-BF16"
-export NEMOTRON_LORA_RANK=32
-export NEMOTRON_LORA_ALPHA=64
-export NEMOTRON_USE_DORA=1
-export NEMOTRON_EPOCHS=3
-export NEMOTRON_BATCH_SIZE=2
-export NEMOTRON_GRAD_ACCUM=8
-export NEMOTRON_LEARNING_RATE="2e-4"
-export NEMOTRON_MAX_LENGTH=2048
-export NEMOTRON_SAVE_STEPS=200
-export NEMOTRON_WANDB_PROJECT="nemotron-kaggle-reasoner"
+# ===== Step 1: Venv in /tmp SSD (not Lustre) =====
+echo "=== Step 1: Venv in /tmp SSD ==="
+VENV_DIR="/tmp/nem_venv_$$"
+python3.11 -m venv --without-pip "$VENV_DIR"
+curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip_$$.py
+"$VENV_DIR/bin/python" /tmp/get-pip_$$.py --quiet
+rm /tmp/get-pip_$$.py
+source "$VENV_DIR/bin/activate"
 
-# ── Venv setup ─────────────────────────────────────────────────────
-# Use the existing ROCm venv (no bitsandbytes required)
-VENV="$HOME/scratch/venv_rocm"
-if [ ! -d "$VENV" ]; then
-    echo "Creating ROCm venv..."
-    python3 -m venv "$VENV"
-    source "$VENV/bin/activate"
-    pip install --upgrade pip
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
-    pip install transformers accelerate peft trl datasets safetensors einops wandb pandas tqdm
-else
-    source "$VENV/bin/activate"
-fi
+echo "Python: $(python --version)"
+echo "venv at: $VENV_DIR"
 
-echo "Python: $(which python)"
+# ===== Step 2: PyTorch ROCm (--no-deps to avoid pulling CUDA variant) =====
+echo "=== Step 2: PyTorch ROCm ==="
+pip install --no-deps torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/rocm6.1
+
+# ===== Step 3: ML stack WITH dependencies (SSD handles this in seconds) =====
+echo "=== Step 3: ML stack ==="
+pip install transformers accelerate peft trl datasets \
+    safetensors sentencepiece wandb
+
 echo "PyTorch: $(python -c 'import torch; print(torch.__version__)')"
 echo "ROCm available: $(python -c 'import torch; print(torch.cuda.is_available())')"
+echo "GPU: $(python -c 'import torch; print(torch.cuda.get_device_name(0))')"
+echo "VRAM: $(python -c 'import torch; props=torch.cuda.get_device_properties(0); print(f\"{props.total_mem/1e9:.1f} GB\")')"
 
-# ── Prepare Kaggle + ecology dataset ────────────────────────────────
-DATASET_JSONL="$DATASET_DIR/combined_dataset.jsonl"
-if [ ! -f "$DATASET_JSONL" ]; then
-    echo "Generating combined Kaggle + ecology dataset..."
-    python "$PROJECT_DIR/scripts/prepare_dataset.py" \
-        --kaggle-csv "$KAGGLE_CSV" \
-        --output "$DATASET_JSONL" \
-        --kaggle-ratio 0.5 \
-        --total 20000
+# ===== Step 4: Verify dataset exists =====
+echo "=== Step 4: Dataset ==="
+if [ -f "$DATASET_JSONL" ]; then
+    echo "Dataset: $(wc -l < "$DATASET_JSONL") examples"
+else
+    echo "ERROR: Dataset not found at $DATASET_JSONL"
+    exit 1
 fi
 
-echo "Dataset: $(wc -l < "$DATASET_JSONL") examples"
+# ===== Step 5: Verify model exists =====
+echo "=== Step 5: Model ==="
+if [ -d "$MODEL_DIR" ]; then
+    echo "Model found at $MODEL_DIR"
+    export NEMOTRON_MODEL_DIR="$MODEL_DIR"
+else
+    echo "Using HuggingFace Hub: nvidia/Nemotron-3-Nano-30B-A3B-BF16"
+fi
 
-# ── Train ──────────────────────────────────────────────────────────
-echo "Starting BF16 DoRA training on MI210..."
+# ===== Step 6: Train =====
+echo "=== Step 6: Training ==="
 echo "Output: $OUTPUT_DIR"
 
-python "$PROJECT_DIR/scripts/train_bf16_lora.py" \
+python "$SCRIPTS_DIR/train_bf16_lora.py" \
     --dataset "$DATASET_JSONL" \
     --output "$OUTPUT_DIR"
 
 echo ""
-echo "========================================"
-echo " Training complete!"
-echo " Adapter: $OUTPUT_DIR/final/"
-echo "========================================"
-echo ""
-
-# ── Quick evaluation ───────────────────────────────────────────────
-echo "Running evaluation on 100 puzzles..."
-python "$PROJECT_DIR/scripts/evaluate.py" \
-    --adapter "$OUTPUT_DIR/final/" \
-    --kaggle-csv "$KAGGLE_CSV" \
-    --n 100 \
-    --output "$OUTPUT_DIR/eval_results.json"
-
-echo ""
-echo "Done! Adapter at: $OUTPUT_DIR/final/"
-echo "Eval results at: $OUTPUT_DIR/eval_results.json"
+echo "=== DONE ==="
+echo "Adapter: $OUTPUT_DIR/final/"
