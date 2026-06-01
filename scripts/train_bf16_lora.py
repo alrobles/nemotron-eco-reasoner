@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """
-BF16 LoRA fine-tuning of Nemotron-3-Nano-30B-A3B for Kaggle reasoning puzzles.
+BF16 DoRA fine-tuning of Nemotron-3-Nano-30B-A3B for Kaggle reasoning puzzles.
 
 No quantization — loads model in pure bfloat16. The MoE architecture has
-~30B total params but only ~3B active, so BF16 + rank-32 LoRA fits within
+~30B total params but only ~3B active, so BF16 + rank-32 DoRA fits within
 64 GB MI210 VRAM without bitsandbytes.
+
+DoRA (Weight-Decomposed Low-Rank Adaptation) decomposes weights into
+magnitude + direction, learning both independently. +3-4% on reasoning
+benchmarks vs standard LoRA with <10% VRAM overhead. Zero inference cost
+— merges back just like LoRA.
+
+Fallback to standard LoRA: set NEMOTRON_USE_DORA=0.
 
 Usage:
     python scripts/train_bf16_lora.py --dataset data/kaggle_dataset.jsonl --output checkpoints/
@@ -13,6 +20,7 @@ Environment variables (optional):
     NEMOTRON_BASE_MODEL: HuggingFace model ID (default: nvidia/Nemotron-3-Nano-30B-A3B-BF16)
     NEMOTRON_LORA_RANK: LoRA rank (default: 32)
     NEMOTRON_LORA_ALPHA: LoRA alpha (default: 64)
+    NEMOTRON_USE_DORA: Use DoRA weight decomposition (default: 1, set 0 for standard LoRA)
     NEMOTRON_EPOCHS: Number of epochs (default: 3)
     NEMOTRON_BATCH_SIZE: Micro-batch size per GPU (default: 2)
     NEMOTRON_GRAD_ACCUM: Gradient accumulation steps (default: 8)
@@ -79,7 +87,7 @@ def get_target_modules(model):
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear):
             target_modules.add(name.split(".")[-1])
-    candidates = {"q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"}
+    candidates = {"q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "in_proj", "out_proj"}
     found = list(candidates & target_modules) or list(target_modules)
     return found
 
@@ -121,6 +129,7 @@ def main():
     model_id = os.environ.get("NEMOTRON_BASE_MODEL", "nvidia/Nemotron-3-Nano-30B-A3B-BF16")
     lora_rank = int(os.environ.get("NEMOTRON_LORA_RANK", "32"))
     lora_alpha = int(os.environ.get("NEMOTRON_LORA_ALPHA", "64"))
+    use_dora = os.environ.get("NEMOTRON_USE_DORA", "1") not in ("0", "false", "no")
     epochs = int(os.environ.get("NEMOTRON_EPOCHS", "3"))
     micro_batch = int(os.environ.get("NEMOTRON_BATCH_SIZE", "2"))
     grad_accum = int(os.environ.get("NEMOTRON_GRAD_ACCUM", "8"))
@@ -179,7 +188,10 @@ def main():
     target_modules = get_target_modules(model)
     logger.info(f"LoRA target modules: {target_modules}")
 
-    # ── LoRA config ─────────────────────────────────────────────────────
+    # ── DoRA config (weight-decomposed LoRA) ─────────────────────────────
+    # DoRA decomposes weights into magnitude + direction, learning both.
+    # Consistently +3-4% on reasoning tasks vs standard LoRA with <10% VRAM overhead.
+    # NVIDIA (Nemotron authors) developed DoRA — zero inference cost (merges like LoRA).
     peft_config = LoraConfig(
         r=lora_rank,
         lora_alpha=lora_alpha,
@@ -187,6 +199,7 @@ def main():
         lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM",
+        use_dora=use_dora,
     )
 
     # ── Training args ───────────────────────────────────────────────────

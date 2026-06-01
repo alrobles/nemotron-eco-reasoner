@@ -9,14 +9,15 @@
 #SBATCH --error=logs/nemotron_kaggle_%j.err
 #SBATCH --signal=B:SIGUSR1@300
 
-# Nemotron-3-Nano-30B BF16 LoRA training — single MI210 64GB (ROCm)
+# Nemotron-3-Nano-30B BF16 DoRA training — single MI210 64GB (ROCm)
 #
-# No quantization — loads model in pure BF16 (no bitsandbytes).
-# MoE: 30B total params, ~3B active. BF16 + rank-32 LoRA ~20 GB VRAM.
+# DoRA (Weight-Decomposed LoRA) — +3-4% reasoning vs standard LoRA.
+# No quantization — pure BF16, no bitsandbytes.
+# MoE: 30B total params, ~3B active. BF16 + rank-32 DoRA ~22 GB VRAM.
 #
 # Key changes from old QLoRA approach:
-#   - No bitsandbytes — pure BF16 LoRA
-#   - Kaggle-only dataset (no ecology)
+#   - No bitsandbytes — pure BF16 DoRA
+#   - Kaggle + ecology mixed dataset
 #   - Uses chat template formatting
 
 set -euo pipefail
@@ -32,6 +33,7 @@ mkdir -p "$DATASET_DIR" "$OUTPUT_DIR" logs
 export NEMOTRON_BASE_MODEL="nvidia/Nemotron-3-Nano-30B-A3B-BF16"
 export NEMOTRON_LORA_RANK=32
 export NEMOTRON_LORA_ALPHA=64
+export NEMOTRON_USE_DORA=1
 export NEMOTRON_EPOCHS=3
 export NEMOTRON_BATCH_SIZE=2
 export NEMOTRON_GRAD_ACCUM=8
@@ -58,19 +60,21 @@ echo "Python: $(which python)"
 echo "PyTorch: $(python -c 'import torch; print(torch.__version__)')"
 echo "ROCm available: $(python -c 'import torch; print(torch.cuda.is_available())')"
 
-# ── Prepare Kaggle-only dataset ────────────────────────────────────
-DATASET_JSONL="$DATASET_DIR/kaggle_dataset.jsonl"
+# ── Prepare Kaggle + ecology dataset ────────────────────────────────
+DATASET_JSONL="$DATASET_DIR/combined_dataset.jsonl"
 if [ ! -f "$DATASET_JSONL" ]; then
-    echo "Generating Kaggle-only dataset..."
-    python "$PROJECT_DIR/scripts/prepare_dataset_kaggle.py" \
+    echo "Generating combined Kaggle + ecology dataset..."
+    python "$PROJECT_DIR/scripts/prepare_dataset.py" \
         --kaggle-csv "$KAGGLE_CSV" \
-        --output "$DATASET_JSONL"
+        --output "$DATASET_JSONL" \
+        --kaggle-ratio 0.5 \
+        --total 20000
 fi
 
 echo "Dataset: $(wc -l < "$DATASET_JSONL") examples"
 
 # ── Train ──────────────────────────────────────────────────────────
-echo "Starting BF16 LoRA training on MI210..."
+echo "Starting BF16 DoRA training on MI210..."
 echo "Output: $OUTPUT_DIR"
 
 python "$PROJECT_DIR/scripts/train_bf16_lora.py" \
