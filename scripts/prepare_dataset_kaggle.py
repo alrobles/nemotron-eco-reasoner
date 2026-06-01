@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Prepare Kaggle-only reasoning dataset for Nemotron-3-Nano training.
+Prepare Kaggle reasoning dataset for Nemotron-3-Nano training.
 
 Converts Kaggle train.csv to ShareGPT-format JSONL with reasoning-focused
-system prompt. No ecology data — 100% focused on the Kaggle competition.
+system prompt. The full puzzle prompt from the CSV is used verbatim as the
+user message, with the answer wrapped in \\boxed{}.
 
 Usage:
     python scripts/prepare_dataset_kaggle.py \
         --kaggle-csv data/train.csv \
-        --output data/kaggle_dataset.jsonl
+        --output data/kaggle_dataset.jsonl \
+        --max-examples 10000
 """
 
 import argparse
@@ -25,19 +27,34 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "You are an AI assistant specialized in logical reasoning and mathematical puzzles. "
     "For every problem, reason step by step and place your final answer inside \\boxed{...}. "
-    "Always show your work before giving the final answer."
+    "Show your complete reasoning before giving the final answer."
 )
 
 
-def load_kaggle_csv(path: str) -> list[dict]:
-    """Load Kaggle train.csv and convert to ShareGPT format."""
+def load_kaggle_csv(path: str, max_examples: int = 0) -> list[dict]:
+    """Load Kaggle train.csv and convert to ShareGPT format.
+    
+    Uses the full puzzle prompt from the 'prompt' column as the user message.
+    The answer is wrapped in \\boxed{} format.
+    """
     df = pd.read_csv(path)
-    logger.info(f"Loaded {len(df)} Kaggle rows")
+    logger.info(f"Loaded {len(df)} Kaggle rows from {path}")
+    
+    # Verify columns
+    for col in ["id", "prompt", "answer"]:
+        if col not in df.columns:
+            raise ValueError(f"Missing column '{col}' in CSV. Found: {list(df.columns)}")
 
     examples = []
+    skipped = 0
     for _, row in df.iterrows():
         puzzle_id = row["id"]
-        answer = row["answer"]
+        prompt_text = str(row["prompt"]).strip()
+        answer = str(row["answer"]).strip()
+        
+        if not prompt_text or not answer:
+            skipped += 1
+            continue
 
         examples.append({
             "messages": [
@@ -45,7 +62,7 @@ def load_kaggle_csv(path: str) -> list[dict]:
                 {
                     "role": "user",
                     "content": (
-                        f"Puzzle {puzzle_id}: Determine the answer to this reasoning puzzle. "
+                        f"Puzzle {puzzle_id}: {prompt_text}\n\n"
                         f"Think step by step and place your final answer inside \\boxed{{}}."
                     ),
                 },
@@ -53,6 +70,14 @@ def load_kaggle_csv(path: str) -> list[dict]:
             ]
         })
 
+    if skipped:
+        logger.warning(f"Skipped {skipped} rows with empty prompt/answer")
+    
+    # Cap if requested
+    if max_examples > 0 and len(examples) > max_examples:
+        examples = random.sample(examples, max_examples)
+        logger.info(f"Capped to {max_examples} examples (from {len(df)})")
+    
     logger.info(f"Converted {len(examples)} Kaggle puzzles")
     return examples
 
@@ -70,12 +95,7 @@ def main():
     args = parser.parse_args()
 
     # Load Kaggle
-    kaggle_examples = load_kaggle_csv(args.kaggle_csv)
-
-    # Cap if requested
-    if args.max_examples > 0 and len(kaggle_examples) > args.max_examples:
-        kaggle_examples = random.sample(kaggle_examples, args.max_examples)
-        logger.info(f"Capped to {args.max_examples} examples")
+    kaggle_examples = load_kaggle_csv(args.kaggle_csv, args.max_examples)
 
     # Shuffle for good measure
     random.shuffle(kaggle_examples)

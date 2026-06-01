@@ -36,16 +36,25 @@ SYSTEM_PROMPT = (
 
 
 def load_kaggle_csv(path: str) -> list[dict]:
-    """Load Kaggle train.csv and convert to ShareGPT format."""
+    """Load Kaggle train.csv and convert to ShareGPT format.
+    
+    Uses the full puzzle prompt from the 'prompt' column verbatim.
+    """
     import pandas as pd
 
     df = pd.read_csv(path)
     logger.info(f"Loaded {len(df)} Kaggle rows")
 
     examples = []
+    skipped = 0
     for _, row in df.iterrows():
         puzzle_id = row["id"]
-        answer = row["answer"]
+        prompt_text = str(row["prompt"]).strip()
+        answer = str(row["answer"]).strip()
+        
+        if not prompt_text or not answer:
+            skipped += 1
+            continue
 
         examples.append({
             "messages": [
@@ -53,7 +62,7 @@ def load_kaggle_csv(path: str) -> list[dict]:
                 {
                     "role": "user",
                     "content": (
-                        f"Puzzle {puzzle_id}: Determine the answer to this reasoning puzzle. "
+                        f"Puzzle {puzzle_id}: {prompt_text}\n\n"
                         f"Think step by step and place your final answer inside \\boxed{{}}."
                     ),
                 },
@@ -61,6 +70,8 @@ def load_kaggle_csv(path: str) -> list[dict]:
             ]
         })
 
+    if skipped:
+        logger.warning(f"Skipped {skipped} rows with empty prompt/answer")
     logger.info(f"Converted {len(examples)} Kaggle puzzles")
     return examples
 
