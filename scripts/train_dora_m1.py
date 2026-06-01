@@ -75,14 +75,19 @@ if not os.path.exists(VENV_DIR):
         log("  Installing PyTorch ROCm...")
         subprocess.run([pip, "install", "--no-deps", "torch==2.6.0",
                         "--index-url", "https://download.pytorch.org/whl/rocm6.1"], check=True)
-        log("  Installing core packages...")
-        for pkg in ["transformers", "peft", "accelerate", "datasets", "trl",
-                     "sentencepiece", "huggingface-hub", "httpcore",
-                     "wandb", "tensorboard", "numpy", "typing-extensions"]:
-            subprocess.run([pip, "install", "--no-deps", pkg], check=True)
+        log("  Installing core packages (WITH deps on local SSD — fast)...")
+        subprocess.run([pip, "install",
+            "transformers", "peft", "accelerate", "datasets", "trl",
+            "sentencepiece", "huggingface-hub", "httpcore",
+            "wandb", "tensorboard",
+        ], check=True)
         log("  Venv ready.")
-
 python_exe = os.path.join(VENV_DIR, "bin", "python")
+log("  Verifying imports...")
+subprocess.run([python_exe, "-c",
+    "import transformers, peft, datasets, trl, accelerate; "
+    "print(f'transformers={transformers.__version__}, peft={peft.__version__}')"
+], check=True)
 log(f"  Python: {python_exe}")
 
 # ─── Step 2: Check GPU ───────────────────────────────────────────
