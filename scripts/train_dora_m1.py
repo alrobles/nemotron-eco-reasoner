@@ -65,13 +65,10 @@ if not os.path.exists(VENV_DIR):
         log("  Tarball extracted.")
     else:
         log(f"  Creating fresh venv at {VENV_DIR}...")
-        subprocess.run([sys.executable, "-m", "venv", "--without-pip", VENV_DIR], check=True)
-        # Bootstrap pip
-        subprocess.run([sys.executable, "-m", "ensurepip", "--upgrade"], check=True)
+        subprocess.run([sys.executable, "-m", "venv", VENV_DIR], check=True)
         pip = os.path.join(VENV_DIR, "bin", "pip")
-        subprocess.run([sys.executable, "-m", "pip", "install", "--target",
-                        os.path.join(VENV_DIR, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages"),
-                        "pip"], check=True)
+        log("  Upgrading pip...")
+        subprocess.run([pip, "install", "--upgrade", "pip"], check=True)
         # Auto-detect GPU type and install correct PyTorch
         gpu_type = "cpu"
         try:
