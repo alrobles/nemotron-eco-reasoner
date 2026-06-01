@@ -1,0 +1,32 @@
+Bootstrap: docker
+From: rocm/pytorch:rocm6.1_ubuntu22.04_py3.10_pytorch_2.4
+
+%labels
+    Author Angel Luis Robles Fernandez <a.l.robles.fernandez@gmail.com>
+    Description Nemotron-3-Nano BF16 LoRA/DoRA training (ROCm 6.1, MI210)
+
+%environment
+    export ROCM_TARGET=gfx90a
+    export HIP_PLATFORM=amd
+    export TORCH_HIP_ARCH_LIST=gfx90a
+    export HF_HUB_DISABLE_PROGRESS_BARS=1
+    export PYTHONUNBUFFERED=1
+
+%post
+    # Training stack — single pip call so deps resolve cleanly (no Lustre, no --no-deps)
+    pip install --no-cache-dir \
+        transformers==4.57.6 \
+        peft==0.17.1 \
+        trl==0.24.0 \
+        datasets==4.5.0 \
+        accelerate==1.10.1 \
+        sentencepiece==0.2.1 \
+        wandb \
+        tensorboard
+
+    # Verify GPU
+    python -c "import torch; print(f'PyTorch {torch.__version__}, ROCm: {torch.cuda.is_available()}')"
+    python -c "import transformers, peft, trl; print('Training stack OK')"
+
+%runscript
+    exec python "$@"
