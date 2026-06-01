@@ -15,7 +15,7 @@
 set -euo pipefail
 
 TIMESTAMP=$(date +%Y%m%d_%H%M)
-MODEL_DIR="/home/a474r867/scratch/nemotron-model"
+MODEL_DIR="/home/a474r867/scratch/nemotron-model/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848"
 KAGGLE_CSV="/home/a474r867/scratch/nemotron-kaggle/train.csv"
 TRAIN_SCRIPT="/home/a474r867/scratch/nemotron-eco-reasoner-full/scripts/train_bf16_lora.py"
 DATA_SCRIPT="/home/a474r867/scratch/nemotron-eco-reasoner-full/scripts/prepare_dataset_kaggle.py"
