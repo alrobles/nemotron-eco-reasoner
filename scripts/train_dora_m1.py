@@ -72,9 +72,27 @@ if not os.path.exists(VENV_DIR):
         subprocess.run([sys.executable, "-m", "pip", "install", "--target",
                         os.path.join(VENV_DIR, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages"),
                         "pip"], check=True)
-        log("  Installing PyTorch ROCm...")
-        subprocess.run([pip, "install", "--no-deps", "torch==2.6.0",
-                        "--index-url", "https://download.pytorch.org/whl/rocm6.1"], check=True)
+        # Auto-detect GPU type and install correct PyTorch
+        gpu_type = "cpu"
+        try:
+            subprocess.run(["nvidia-smi"], capture_output=True, timeout=5, check=False)
+            gpu_type = "cuda"
+        except FileNotFoundError:
+            pass
+        if gpu_type == "cpu":
+            try:
+                subprocess.run(["rocm-smi"], capture_output=True, timeout=5, check=False)
+                gpu_type = "rocm"
+            except FileNotFoundError:
+                pass
+        if gpu_type == "rocm":
+            log("  Installing PyTorch ROCm...")
+            subprocess.run([pip, "install", "--no-deps", "torch==2.6.0",
+                            "--index-url", "https://download.pytorch.org/whl/rocm6.1"], check=True)
+        else:
+            log("  Installing PyTorch CUDA...")
+            subprocess.run([pip, "install", "torch==2.6.0",
+                            "--index-url", "https://download.pytorch.org/whl/cu121"], check=True)
         log("  Installing core packages (WITH deps on local SSD — fast)...")
         subprocess.run([pip, "install",
             "transformers", "peft", "accelerate", "datasets", "trl",
