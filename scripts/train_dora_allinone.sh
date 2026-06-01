@@ -1,15 +1,15 @@
 #!/bin/bash
 # All-in-one Nemotron DoRA training on KU-HPC
-# Solves: python3.9 venv, Lustre pip timeout, multi-step orchestration
+# Solves: python3.9 venv, Lustre pip timeout, huggingface-hub dep hell
 # Run: sbatch --partition=sixhour --gres=gpu:mi210:1 --mem=64G --time=6:00:00 scripts/train_dora_allinone.sh
 
-MODEL_DIR="/home/a474r867/scratch/nemotron-model"
-DATA_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full/data"
 # Hardcoded: Slurm copies script to /var/spool/slurmd/, BASH_SOURCE is unreliable
 REPO_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full"
 SCRIPT_DIR="$REPO_DIR/scripts"
-OUTPUT_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full/outputs"
-LOG_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full/logs"
+MODEL_DIR="/home/a474r867/scratch/nemotron-model"
+DATA_DIR="$REPO_DIR/data"
+OUTPUT_DIR="$REPO_DIR/outputs"
+LOG_DIR="$REPO_DIR/logs"
 VENV_DIR="/tmp/nemotron_venv_$$"
 
 N_SAMPLES="${NEMOTRON_N_SAMPLES:-5000}"
@@ -37,12 +37,15 @@ echo "venv created OK"
 # ── Step 2: PyTorch ROCm ──
 echo "=== Step 2: PyTorch ROCm ==="
 pip install --no-deps torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
-    --index-url https://download.pytorch.org/whl/rocm6.1 2>&1 | tail -5
+    --index-url https://download.pytorch.org/whl/rocm6.1 2>&1 | tail -3
 
-# ── Step 3: Core deps (one by one, --no-deps, no Lustre hell) ──
-echo "=== Step 3: Core ML deps ==="
+# ── Step 3: huggingface-hub WITH deps (small, avoids dep hell) ──
+echo "=== Step 3: huggingface-hub (with deps) ==="
+pip install huggingface-hub 2>&1 | tail -3
+
+# ── Step 4: Core ML deps (--no-deps, pure Python, fast) ──
+echo "=== Step 4: Core ML deps ==="
 for pkg in \
-    "huggingface-hub" \
     "transformers==4.57.6" \
     "peft==0.17.1" \
     "accelerate==1.10.1" \
@@ -53,16 +56,14 @@ for pkg in \
     "sympy" \
     "mpmath" \
     "numpy" \
-    "huggingface-hub" \
-    "httpcore" \
     "wandb" \
     "tensorboard"; do
     echo "  Installing $pkg..."
     pip install --no-deps "$pkg" 2>&1 | tail -1
 done
 
-# ── Step 4: Verify GPU ──
-echo "=== Step 4: Verify GPU ==="
+# ── Step 5: Verify GPU ──
+echo "=== Step 5: Verify GPU ==="
 python -c "
 import torch
 print(f'PyTorch: {torch.__version__}')
@@ -72,10 +73,10 @@ print(f'GPU name: {torch.cuda.get_device_name(0)}')
 print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB')
 "
 
-# ── Step 5: Prepare dataset ──
-echo "=== Step 5: Prepare dataset ==="
+# ── Step 6: Prepare dataset ──
+echo "=== Step 6: Prepare dataset ==="
 mkdir -p "$DATA_DIR"
-python "$REPO_DIR/scripts/prepare_dataset.py" \
+python "$SCRIPT_DIR/prepare_dataset.py" \
     --source kaggle \
     --kaggle-csv "$DATA_DIR/train.csv" \
     --output "$DATA_DIR/train_${N_SAMPLES}.jsonl" \
@@ -84,14 +85,14 @@ python "$REPO_DIR/scripts/prepare_dataset.py" \
 
 echo "Dataset: $(wc -l < "$DATA_DIR/train_${N_SAMPLES}.jsonl") examples"
 
-# ── Step 6: Train! ──
-echo "=== Step 6: Training ==="
+# ── Step 7: Train! ──
+echo "=== Step 7: Training ==="
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
 
 export NEMOTRON_USE_DORA="$DORA"
 export NEMOTRON_N_SAMPLES="$N_SAMPLES"
 
-python "$REPO_DIR/scripts/train_bf16_lora.py" \
+python "$SCRIPT_DIR/train_bf16_lora.py" \
     --model_name_or_path "$MODEL_DIR" \
     --dataset_path "$DATA_DIR/train_${N_SAMPLES}.jsonl" \
     --output_dir "$OUTPUT_DIR/nemotron-dora-m1-$(date +%Y%m%d_%H%M)" \
