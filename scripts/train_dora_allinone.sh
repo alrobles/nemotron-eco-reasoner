@@ -3,8 +3,6 @@
 # Solves: python3.9 venv, Lustre pip timeout, multi-step orchestration
 # Run: sbatch --partition=sixhour --gres=gpu:mi210:1 --mem=64G --time=6:00:00 scripts/train_dora_allinone.sh
 
-set -euo pipefail
-
 MODEL_DIR="/home/a474r867/scratch/nemotron-model"
 DATA_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full/data"
 # Hardcoded: Slurm copies script to /var/spool/slurmd/, BASH_SOURCE is unreliable
@@ -27,6 +25,8 @@ echo "Samples: $N_SAMPLES | DoRA: $DORA | Epochs: $EPOCHS"
 echo "Batch: $BATCH_SIZE | GradAccum: $GRAD_ACCUM"
 echo ""
 
+set -euo pipefail
+
 # ── Step 1: Create venv on fast local SSD ──
 echo "=== Step 1: Creating venv on $VENV_DIR ==="
 python3.11 -m venv --without-pip "$VENV_DIR"
@@ -42,6 +42,7 @@ pip install --no-deps torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
 # ── Step 3: Core deps (one by one, --no-deps, no Lustre hell) ──
 echo "=== Step 3: Core ML deps ==="
 for pkg in \
+    "huggingface-hub" \
     "transformers==4.57.6" \
     "peft==0.17.1" \
     "accelerate==1.10.1" \
