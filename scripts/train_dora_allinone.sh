@@ -7,8 +7,9 @@ set -euo pipefail
 
 MODEL_DIR="/home/a474r867/scratch/nemotron-model"
 DATA_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full/data"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
+# Hardcoded: Slurm copies script to /var/spool/slurmd/, BASH_SOURCE is unreliable
+REPO_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full"
+SCRIPT_DIR="$REPO_DIR/scripts"
 OUTPUT_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full/outputs"
 LOG_DIR="/home/a474r867/scratch/nemotron-eco-reasoner-full/logs"
 VENV_DIR="/tmp/nemotron_venv_$$"
