@@ -41,13 +41,16 @@ $PIP install --no-deps \
     accelerate==1.10.1 \
     datasets==4.5.0 \
     trl==0.24.0 \
-    sentencepiece==0.2.1
+    sentencepiece==0.2.1 \
+    huggingface-hub \
+    tokenizers \
+    safetensors
 
 echo "=== Step 4: Resolve torch sub-deps ==="
 $PIP install --no-deps sympy typing-extensions numpy filelock fsspec jinja2 networkx pillow mpmath
 
 echo "=== Step 5: Key extras ==="
-$PIP install --no-deps wandb tensorboard scikit-learn
+$PIP install --no-deps wandb tensorboard scikit-learn pyarrow packaging pyyaml requests
 
 echo "=== Step 6: Verify ==="
 source "$TTMP/bin/activate"
