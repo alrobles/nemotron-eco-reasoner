@@ -52,6 +52,8 @@ for pkg in \
     "sympy" \
     "mpmath" \
     "numpy" \
+    "huggingface-hub" \
+    "httpcore" \
     "wandb" \
     "tensorboard"; do
     echo "  Installing $pkg..."
