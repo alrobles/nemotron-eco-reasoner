@@ -24,7 +24,7 @@ DATASET_DIR="$HOME/scratch/nemotron-eco-reasoner/data"
 OUTPUT_DIR="$HOME/scratch/nemotron-eco-reasoner/outputs/m1_dora_$(date +%Y%m%d_%H%M)"
 KAGGLE_CSV="$HOME/scratch/nemotron-kaggle/train.csv"
 ECOAGENT_DIR="$HOME/work/Github/ecoagent"
-VENV_DIR="$HOME/nemotron-venv"
+VENV_DIR="$HOME/scratch/nemotron-rocm-venv"
 
 mkdir -p "$DATASET_DIR" "$OUTPUT_DIR" logs
 
