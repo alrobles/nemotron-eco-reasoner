@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=nem-dora-m1
-#SBATCH --partition=gpu
+#SBATCH --partition=sixhour
 #SBATCH --gres=gpu:mi210:1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
