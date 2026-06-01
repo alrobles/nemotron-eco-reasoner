@@ -11,7 +11,7 @@
 
 # ── Milestone 1: BF16 DoRA on MI210 ──────────────────────────────
 # Nemotron-3-Nano-30B-A3B-BF16 → DoRA rank=32 → ~35 GB VRAM
-# Dataset: 10K total (5K Kaggle + 5K ecology) — proof of concept
+# Dataset: 5K Kaggle puzzles — proof of concept (M2 adds ecology)
 # 3 epochs, batch=2, grad_accum=8 = effective batch 16
 #
 # If successful: scale to multi-GPU, more data, higher rank.
@@ -23,20 +23,14 @@ PROJECT_DIR="$HOME/work/Github/nemotron-eco-reasoner"
 DATASET_DIR="$HOME/scratch/nemotron-eco-reasoner/data"
 OUTPUT_DIR="$HOME/scratch/nemotron-eco-reasoner/outputs/m1_dora_$(date +%Y%m%d_%H%M)"
 KAGGLE_CSV="$HOME/scratch/nemotron-kaggle/train.csv"
-ECOAGENT_DIR="$HOME/work/Github/ecoagent"
 VENV_DIR="$HOME/scratch/nemotron-rocm-venv"
 
 mkdir -p "$DATASET_DIR" "$OUTPUT_DIR" logs
 
 # ── Activate venv ────────────────────────────────────────────────
-if [ -d "$VENV_DIR" ]; then
-    source "$VENV_DIR/bin/activate"
-    echo "Activated nemotron-venv: $(which python)"
-else
-    echo "ERROR: nemotron-venv not found at $VENV_DIR"
-    echo "Run nem-venv-setup job first (job 22274648)"
-    exit 1
-fi
+source "$VENV_DIR/bin/activate"
+echo "Activated venv: $(which python)"
+python -c "import torch; print(f'PyTorch {torch.__version__}'); print(f'ROCm available: {torch.cuda.is_available()}')"
 
 # ── Environment ──────────────────────────────────────────────────
 export NEMOTRON_BASE_MODEL="nvidia/Nemotron-3-Nano-30B-A3B-BF16"
@@ -57,22 +51,20 @@ rocm-smi --showproductname 2>/dev/null || echo "rocm-smi unavailable"
 python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA/ROCm: {torch.cuda.is_available()}'); print(f'GPUs: {torch.cuda.device_count()}'); print(f'Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
 
 # ── Prepare dataset (if not exists) ──────────────────────────────
-COMBINED_JSONL="$DATASET_DIR/combined_kaggle_eco_10k.jsonl"
+COMBINED_JSONL="$DATASET_DIR/kaggle_5k_m1.jsonl"
 if [ ! -f "$COMBINED_JSONL" ]; then
-    echo "=== Preparing dataset (10K: 5K Kaggle + 5K ecology) ==="
-    python "$PROJECT_DIR/scripts/prepare_dataset.py" \
+    echo "=== Preparing dataset (5K Kaggle) ==="
+    python "$PROJECT_DIR/scripts/prepare_dataset_kaggle.py" \
         --kaggle-csv "$KAGGLE_CSV" \
-        --ecoagent-dir "$ECOAGENT_DIR" \
         --output "$COMBINED_JSONL" \
-        --kaggle-ratio 0.5 \
-        --total 10000
+        --total 5000
     echo "Dataset written: $(wc -l < "$COMBINED_JSONL") lines"
 else
     echo "Dataset exists: $COMBINED_JSONL ($(wc -l < "$COMBINED_JSONL") lines)"
 fi
 
 # ── Train ────────────────────────────────────────────────────────
-echo "=== Training: BF16 DoRA rank=32 on MI210 ==="
+echo "=== Training: BF16 DoRA rank=32 on MI210 (5K Kaggle) ==="
 echo "Output: $OUTPUT_DIR"
 echo "Start: $(date)"
 
