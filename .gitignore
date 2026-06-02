@@ -3,23 +3,21 @@ __pycache__/
 *.pyc
 .venv/
 
-# Training outputs
+# Training checkpoints (large binaries, not in git)
 checkpoints/
-logs/
-*.safetensors
-*.bin
+**/checkpoints/
 
-# Data (large)
+# Kaggle data (large CSVs, not in git)
 data/train.csv
-data/*.jsonl
-data/*.parquet
-
-# Kaggle
+data/test.csv
 submission.zip
 
-# WandB
+# WandB (cache, not in git)
 wandb/
 
 # IDE
 .idea/
 .vscode/
+
+# Note: training_logs/ IS tracked — permanent record of every attempt.
+# Note: data/*.jsonl IS tracked (small datasets for reproduction).
