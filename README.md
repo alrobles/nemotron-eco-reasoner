@@ -1,69 +1,82 @@
 # Nemotron Eco-Reasoner
 
-Dual-purpose LoRA fine-tuning of NVIDIA Nemotron-3-Nano-30B-A3B for:
+Dual-purpose DoRA fine-tuning of NVIDIA Nemotron-3-Nano-30B-A3B for:
 
 1. **Reasoning puzzles** — Kaggle [NVIDIA Nemotron Model Reasoning Challenge](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/) (deadline: June 15, 2026)
 2. **Ecological agent tasks** — ecoSeek scientific assistant (tool-calling, taxonomy, host-parasite extraction)
 
-One model, two capabilities. Trained on a combined dataset: 50% Kaggle logic puzzles + 50% ecology synthetic data from [ecoagent](https://github.com/alrobles/ecoagent).
+One model, two capabilities. Trained on a combined dataset: 50% Kaggle logic puzzles + 50% ecology synthetic data.
 
 ## Architecture
 
 - **Base model:** Nemotron-3-Nano-30B-A3B-BF16 (30B total, ~3B active per token)
-- **Method:** 4-bit QLoRA (rank 32, alpha 64)
-- **Hardware:** A100 80GB or MI210 64GB (single GPU), or multi-node MI210 (FSDP+QLoRA)
-- **Framework:** Hugging Face PEFT + bitsandbytes
+- **Method:** DoRA (Weight-Decomposed Low-Rank Adaptation), rank 32, BF16
+- **Hardware:** MI210 64GB via Apptainer ROCm container (primary), A100 80GB (fallback)
+- **Framework:** PyTorch 2.6 ROCm + transformers 4.57 + peft + trl
+- **Container:** Pre-built Apptainer SIF (`nemotron-rocm.sif`, 21GB) — see [containers/README.md](containers/README.md)
 
 ## Quick Start
 
 ```bash
 # Clone
-git clone https://github.com/alrobles/nemotron-eco-reasoner.git
+gh repo clone alrobles/nemotron-eco-reasoner
 cd nemotron-eco-reasoner
 
-# Install
-pip install -r requirements.txt
-
-# Prepare dual dataset
+# Prepare dataset (Kaggle CSV required in data/train.csv)
 python scripts/prepare_dataset.py --kaggle-csv data/train.csv --output data/combined_dataset.jsonl
 
-# Train (single GPU)
-python scripts/train_qlora.py --dataset data/combined_dataset.jsonl --output checkpoints/
-
-# Evaluate
-python scripts/evaluate.py --adapter checkpoints/final/
-
-# Package for Kaggle submission
-python scripts/submit_kaggle.py --adapter checkpoints/final/ --output submission.zip
+# Generate ecology dataset from PubMed papers
+python scripts/generate_eco_dataset.py --output data/eco_dataset.jsonl
 ```
 
-## HPC (KU CRC)
-
-### Container (recommended for MI210)
-
-Pre-built Apptainer container with PyTorch 2.6.0 ROCm, transformers, peft, trl — zero setup.
-See [containers/README.md](containers/README.md) for full docs.
+### Local training (reumanlab, RTX 2000 Ada)
 
 ```bash
-# On KU-HPC cluster
-CONTAINER=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-rocm.sif
-
-# Verify
-apptainer exec --rocm $CONTAINER python3 -c "import torch; print(torch.cuda.is_available())"
-
-# Train
-apptainer exec --rocm $CONTAINER python3 scripts/train_bf16_lora.py ...
+python scripts/train_m1_container.py \
+    --model /path/to/nemotron-model \
+    --data data/kaggle_5k_train.jsonl \
+    --output outputs/m1_run1 \
+    --max_steps 500
 ```
 
-### Slurm templates (legacy venv approach)
+### HPC training (KU CRC, MI210)
+
+Pre-built Apptainer container with PyTorch 2.6.0 ROCm, transformers, peft, trl — zero setup. `mamba-ssm` installed at runtime (required for Nemotron hybrid architecture).
 
 ```bash
 # Submit to cluster
+sbatch hpc/train_m1_mi210.slurm
+
+# A100 fallback
 sbatch hpc/train_a100.slurm
-# or
-sbatch hpc/train_mi210.slurm
-# or multi-node (3 nodes × 2 MI210s)
+
+# Multi-node scaling (3 nodes × 2 MI210s)
 sbatch hpc/train_multi_node.slurm
+```
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/train_m1_container.py` | **Canonical** — DoRA training via Apptainer container |
+| `scripts/train_bf16_lora.py` | BF16 LoRA training (A100, no container needed) |
+| `scripts/prepare_dataset.py` | Generate combined Kaggle+ecology JSONL dataset |
+| `scripts/generate_eco_dataset.py` | PubMed-based ecological reasoning examples |
+| `scripts/cluster_api.py` | HTTP API for remote training orchestration |
+| `scripts/evaluate.py` | Dual-benchmark evaluation |
+| `scripts/submit_kaggle.py` | Package adapter for Kaggle submission |
+
+## Project Structure
+
+```
+nemotron-eco-reasoner/
+├── scripts/           # Training, dataset prep, eval, submission
+├── hpc/               # Active Slurm templates (3)
+│   └── archive/       # Deprecated templates (9, kept for reference)
+├── containers/        # Apptainer definition + docs
+├── data/              # Training JSONL datasets (gitignored)
+├── outputs/           # Checkpoints and adapters (gitignored)
+└── logs/              # Job output logs (gitignored)
 ```
 
 ## Dataset Composition
@@ -74,13 +87,14 @@ sbatch hpc/train_multi_node.slurm
 | EcoAgent CoFID | ~5K | Host-parasite Q&A |
 | EcoAgent tool-calling | ~5K | Ecological tool selection and synthesis |
 | EcoAgent triplets | ~3K | Host-parasite relationship extraction |
-| EcoAgent taxonomy | ~2K | Taxonomic resolution (WoRMS) |
+| EcoAgent taxonomy | ~2K | Taxonomic resolution |
+| PubMed ecology | var | Paper-based ecological reasoning |
 | **Total** | **~30K** | ShareGPT format |
 
 ## Evaluation
 
 Dual benchmark:
-- **Reasoning accuracy:** Puzzle answer match (\boxed{...}) on Kaggle test split
+- **Reasoning accuracy:** Puzzle answer match on Kaggle test split
 - **Ecology accuracy:** Tool-call accuracy, triplet extraction F1, abstract classification, taxonomy resolution, report quality
 
 ## License
