@@ -19,8 +19,16 @@ import random
 import sys
 import time
 
-# PubMed search module from ecoseek-litdump
-sys.path.insert(0, "/home/reumanlab/ecoseek-litdump/scripts")
+# PubMed search module from ecoseek-litdump — auto-detect location
+import os as _os
+_LITDUMP_PATHS = [
+    "/home/a474r867/work/ecoseek-litdump/scripts",   # cluster
+    "/home/reumanlab/ecoseek-litdump/scripts",        # reumanlab
+]
+for _p in _LITDUMP_PATHS:
+    if _os.path.isdir(_p):
+        sys.path.insert(0, _p)
+        break
 from search_pubmed import search as pubmed_search
 
 # ─── Ecological topics for reasoning extraction ────────────────────
