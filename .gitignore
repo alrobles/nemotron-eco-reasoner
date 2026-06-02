@@ -21,3 +21,6 @@ wandb/
 
 # Note: training_logs/ IS tracked — permanent record of every attempt.
 # Note: data/*.jsonl IS tracked (small datasets for reproduction).
+*.sif
+build-error.log
+build-loop.sh

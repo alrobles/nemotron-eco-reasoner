@@ -39,6 +39,24 @@ python scripts/submit_kaggle.py --adapter checkpoints/final/ --output submission
 
 ## HPC (KU CRC)
 
+### Container (recommended for MI210)
+
+Pre-built Apptainer container with PyTorch 2.6.0 ROCm, transformers, peft, trl — zero setup.
+See [containers/README.md](containers/README.md) for full docs.
+
+```bash
+# On KU-HPC cluster
+CONTAINER=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-rocm.sif
+
+# Verify
+apptainer exec --rocm $CONTAINER python3 -c "import torch; print(torch.cuda.is_available())"
+
+# Train
+apptainer exec --rocm $CONTAINER python3 scripts/train_bf16_lora.py ...
+```
+
+### Slurm templates (legacy venv approach)
+
 ```bash
 # Submit to cluster
 sbatch hpc/train_a100.slurm
