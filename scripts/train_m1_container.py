@@ -88,14 +88,15 @@ log(f"  Dataset ready: {len(dataset)} texts")
 log("Loading model (BF16)...")
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
 
+# trust_remote_code=False — let transformers 4.57.6 use native Nemotron support
+# (the model's custom modeling_nemotron_h.py requires mamba-ssm which we don't have)
 model = AutoModelForCausalLM.from_pretrained(
     args.model,
     torch_dtype=torch.bfloat16,
     device_map="auto",
-    trust_remote_code=True,
 )
 
-tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(args.model)
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
