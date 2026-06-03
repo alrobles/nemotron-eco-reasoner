@@ -31,6 +31,8 @@ parser.add_argument("--lr", type=float, default=2e-4)
 parser.add_argument("--max_seq_len", type=int, default=1024)
 parser.add_argument("--num_epochs", type=int, default=1)
 parser.add_argument("--use_dora", type=int, default=1, help="1=DoRA, 0=standard LoRA")
+parser.add_argument("--fsdp", type=int, default=0, help="1=enable FSDP full_shard for multi-GPU")
+parser.add_argument("--fsdp_config", type=str, default=None, help="Optional accelerate FSDP YAML config")
 args = parser.parse_args()
 
 LOG_FILE = os.path.join(args.output, "train.log")
@@ -88,12 +90,19 @@ log(f"  Dataset ready: {len(dataset)} texts")
 log("Loading model (BF16)...")
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
 
-model = AutoModelForCausalLM.from_pretrained(
-    args.model,
+use_fsdp = bool(args.fsdp)
+log(f"  FSDP: {use_fsdp}")
+
+# When using FSDP, do NOT set device_map — FSDP handles model sharding
+# across GPUs
+model_kwargs = dict(
     torch_dtype=torch.bfloat16,
-    device_map="auto",
     trust_remote_code=True,
 )
+if not use_fsdp:
+    model_kwargs["device_map"] = "auto"
+
+model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
 
 tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
 if tokenizer.pad_token is None:
@@ -143,6 +152,14 @@ training_args = TrainingArguments(
     remove_unused_columns=False,
     report_to="none",
     dataloader_num_workers=0,
+    **({"fsdp": "full_shard", "fsdp_config": {
+        "fsdp_auto_wrap_policy": "TRANSFORMER_BASED_WRAP",
+        "fsdp_state_dict_type": "SHARDED_STATE_DICT",
+        "fsdp_forward_prefetch": True,
+        "fsdp_use_orig_params": True,
+        "fsdp_cpu_ram_efficient_loading": True,
+        "fsdp_sync_module_states": True,
+    }} if use_fsdp else {}),
 )
 
 from trl import SFTTrainer
@@ -186,7 +203,8 @@ manifest = {
     "total_params": total,
     "elapsed_minutes": elapsed / 60,
     "torch_version": torch.__version__,
-    "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none",
+    "gpu_name": [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())] if torch.cuda.is_available() else ["none"],
+    "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
 }
 with open(os.path.join(args.output, "manifest.json"), "w") as f:
     json.dump(manifest, f, indent=2)
