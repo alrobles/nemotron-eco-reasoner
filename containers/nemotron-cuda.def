@@ -1,0 +1,69 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+
+%labels
+    Author Angel Luis Robles Fernandez <a.l.robles.fernandez@gmail.com>
+    Description Nemotron-3-Nano BF16 LoRA/DoRA training (CUDA 12.4, A100)
+    mamba-ssm Pre-compiled (CUDA, native) — zero runtime compilation
+
+%environment
+    export HF_HUB_DISABLE_PROGRESS_BARS=1
+    export PYTHONUNBUFFERED=1
+    export CUDA_HOME=/usr/local/cuda
+    export PATH=$CUDA_HOME/bin:$PATH
+    export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+
+%post
+    set -e
+
+    export CUDA_HOME=/usr/local/cuda
+    export MAX_JOBS=4
+
+    # Verify CUDA toolchain
+    echo "=== CUDA: $(nvcc --version | tail -1) ==="
+    echo "=== PyTorch: $(python3 -c 'import torch; print(torch.__version__)') ==="
+    echo "=== GPU arch: $(python3 -c 'import torch; print(torch.cuda.get_arch_list() if torch.cuda.is_available() else \"build-time only\")') ==="
+
+    # Build deps — --quiet avoids Apptainer broken-pipe
+    pip install --quiet --progress-bar off --no-cache-dir \
+        packaging setuptools wheel ninja
+
+    # Training stack
+    pip install --quiet --progress-bar off --no-cache-dir \
+        transformers==4.57.6 \
+        peft==0.17.1 \
+        trl==0.24.0 \
+        datasets==4.5.0 \
+        accelerate==1.10.1 \
+        sentencepiece==0.2.1 \
+        wandb \
+        tensorboard
+
+    # mamba-ssm + causal-conv1d — CUDA native compilation
+    # On CUDA, this is straightforward with nvcc
+    echo "=== Building mamba-ssm (CUDA) ==="
+    pip install --quiet --progress-bar off --no-cache-dir --no-build-isolation \
+        mamba-ssm 2>&1 | tail -5
+    python3 -c "import mamba_ssm; print('mamba-ssm OK')"
+
+    echo "=== Building causal-conv1d (CUDA) ==="
+    pip install --quiet --progress-bar off --no-cache-dir --no-build-isolation \
+        causal-conv1d 2>&1 | tail -5 || echo "causal-conv1d optional, continuing"
+    python3 -c "import causal_conv1d; print('causal-conv1d OK')" 2>/dev/null || echo "(causal-conv1d not available — PyTorch fallback)"
+
+    # Final verification
+    echo "=== Verification ==="
+    python3 -c "
+import torch
+print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')
+import transformers; print(f'transformers {transformers.__version__}')
+import peft; print(f'peft {peft.__version__}')
+import trl; print(f'trl {trl.__version__}')
+import accelerate; print(f'accelerate {accelerate.__version__}')
+import mamba_ssm; print('mamba-ssm: OK')
+import datasets; print(f'datasets {datasets.__version__}')
+print('ALL CHECKS PASSED')
+"
+
+%runscript
+    exec python3 "$@"
