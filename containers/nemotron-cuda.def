@@ -44,6 +44,11 @@ From: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
     #   The base image has torch 2.5.1; mamba-ssm tries to pull torch 2.12.0
     #   as a dependency, which breaks the compiled CUDA extensions.
     # --no-build-isolation: use the installed torch headers (not a temp venv)
+    #
+    # First upgrade triton — base image has 2.x, mamba-ssm needs 3.x
+    echo "=== Upgrading triton ==="
+    pip install --quiet --progress-bar off --no-cache-dir 'triton>=3.0' 2>&1 | tail -3
+
     echo "=== Building mamba-ssm (CUDA, --no-deps) ==="
     pip install --quiet --progress-bar off --no-cache-dir \
         --no-deps --no-build-isolation \
