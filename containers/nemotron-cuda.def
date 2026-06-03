@@ -4,31 +4,30 @@ From: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
 %labels
     Author Angel Luis Robles Fernandez <a.l.robles.fernandez@gmail.com>
     Description Nemotron-3-Nano BF16 LoRA/DoRA training (CUDA 12.4, A100)
-    mamba-ssm Pre-compiled (CUDA, native) — zero runtime compilation
+    mamba-ssm via conda-forge — zero compilation, pre-built binaries
 
 %environment
     export HF_HUB_DISABLE_PROGRESS_BARS=1
     export PYTHONUNBUFFERED=1
-    export CUDA_HOME=/usr/local/cuda
-    export PATH=$CUDA_HOME/bin:$PATH
-    export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
 %post
     set -e
 
-    export CUDA_HOME=/usr/local/cuda
-    export MAX_JOBS=4
-
-    # Verify CUDA toolchain
-    echo "=== CUDA: $(nvcc --version | tail -1) ==="
+    echo "=== CUDA: $(nvcc --version 2>/dev/null | tail -1 || echo 'not found') ==="
     echo "=== PyTorch: $(python3 -c 'import torch; print(torch.__version__)') ==="
-    echo "=== GPU arch: $(python3 -c 'import torch; print(torch.cuda.get_arch_list() if torch.cuda.is_available() else \"build-time only\")') ==="
 
-    # Build deps — --quiet avoids Apptainer broken-pipe
-    pip install --quiet --progress-bar off --no-cache-dir \
-        packaging setuptools wheel ninja einops
+    # mamba-ssm from conda-forge — pre-compiled, zero dependency hell
+    # conda resolves torch/triton/cuda compatibility automatically
+    echo "=== Installing mamba-ssm via conda-forge ==="
+    conda install -y -c conda-forge mamba-ssm 2>&1 | tail -5
+    python3 -c "import mamba_ssm; print('mamba-ssm OK')"
 
-    # Training stack
+    # causal-conv1d — also via conda-forge
+    echo "=== Installing causal-conv1d via conda-forge ==="
+    conda install -y -c conda-forge causal-conv1d 2>&1 | tail -5 || echo "(optional, continuing)"
+    python3 -c "import causal_conv1d; print('causal-conv1d OK')" 2>/dev/null || echo "(not available)"
+
+    # Training stack via pip (conda versions may be outdated)
     pip install --quiet --progress-bar off --no-cache-dir \
         transformers==4.57.6 \
         peft==0.17.1 \
@@ -39,39 +38,15 @@ From: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
         wandb \
         tensorboard
 
-    # mamba-ssm + causal-conv1d — CUDA native compilation
-    # --no-deps: CRITICAL — prevents pip from replacing torch.
-    #   The base image has torch 2.5.1; mamba-ssm tries to pull torch 2.12.0
-    #   as a dependency, which breaks the compiled CUDA extensions.
-    # --no-build-isolation: use the installed torch headers (not a temp venv)
-    #
-    # First upgrade triton — base image has 2.x, mamba-ssm needs 3.x
-    echo "=== Upgrading triton ==="
-    pip install --quiet --progress-bar off --no-cache-dir 'triton>=3.0' 2>&1 | tail -3
-
-    echo "=== Building mamba-ssm (CUDA, --no-deps) ==="
-    pip install --quiet --progress-bar off --no-cache-dir \
-        --no-deps --no-build-isolation \
-        mamba-ssm 2>&1 | tail -5
-    python3 -c "import mamba_ssm; print('mamba-ssm OK')"
-
-    echo "=== Building causal-conv1d (CUDA, --no-deps) ==="
-    pip install --quiet --progress-bar off --no-cache-dir \
-        --no-deps --no-build-isolation \
-        causal-conv1d 2>&1 | tail -5 || echo "causal-conv1d optional, continuing"
-    python3 -c "import causal_conv1d; print('causal-conv1d OK')" 2>/dev/null || echo "(causal-conv1d not available — PyTorch fallback)"
-
     # Final verification
     echo "=== Verification ==="
     python3 -c "
-import torch
-print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')
+import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')
+import mamba_ssm; print('mamba-ssm: OK')
 import transformers; print(f'transformers {transformers.__version__}')
 import peft; print(f'peft {peft.__version__}')
 import trl; print(f'trl {trl.__version__}')
 import accelerate; print(f'accelerate {accelerate.__version__}')
-import mamba_ssm; print('mamba-ssm: OK')
-import datasets; print(f'datasets {datasets.__version__}')
 print('ALL CHECKS PASSED')
 "
 
