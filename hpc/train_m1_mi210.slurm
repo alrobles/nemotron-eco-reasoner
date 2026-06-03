@@ -3,8 +3,8 @@
 #SBATCH --partition=sixhour
 #SBATCH --time=05:00:00
 #SBATCH --gres=gpu:mi210:1
-#SBATCH --mem=64G
-#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=4
 #SBATCH --output=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/m1_run1/train_%j.out
 #SBATCH --error=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/m1_run1/train_%j.err
 
@@ -37,9 +37,20 @@ if [ -z "$MODEL_PATH" ]; then
 fi
 echo "Model path: $MODEL_PATH"
 
+# FIX: Container has CUDA torch (torch 2.12.0+cu130) — reinstall ROCm torch
+# in writable tmpfs overlay so it takes priority over container's torch
+echo "=== FIX: Reinstalling ROCm torch ==="
+apptainer exec --rocm --writable-tmpfs $CONTAINER bash -c "
+    set -euo pipefail
+    pip install --no-cache-dir torch torchvision torchaudio \
+        --index-url https://download.pytorch.org/whl/rocm6.1 -q 2>&1 | tail -3
+    python3 -c 'import torch; v=torch.__version__; assert "+rocm" in v, f"Expected ROCm torch, got {v}"; print(f"torch {v} OK"); assert torch.cuda.is_available(), "GPU not available"; print(f"GPU: {torch.cuda.get_device_name(0)}")'
+"
+echo "ROCm torch ready."
+
 # Install mamba-ssm at runtime (GPU visible with --rocm)
 echo "Installing mamba-ssm..."
-apptainer exec --rocm --bind $TMPDIR:/tmp $CONTAINER bash -c "
+apptainer exec --rocm --writable-tmpfs --bind $TMPDIR:/tmp $CONTAINER bash -c "
     pip install --no-cache-dir mamba-ssm causal-conv1d 2>&1 | tail -5
     python3 -c 'import mamba_ssm; print(\"mamba-ssm OK\")'
 "
@@ -47,7 +58,7 @@ echo "mamba-ssm ready."
 
 # Train
 echo "Starting training..."
-apptainer exec --rocm --bind $TMPDIR:/tmp $CONTAINER python3 -u $SCRIPTS/train_m1_container.py \
+apptainer exec --rocm --writable-tmpfs --bind $TMPDIR:/tmp $CONTAINER python3 -u $SCRIPTS/train_m1_container.py \
     --model "$MODEL_PATH" \
     --data "$DATA" \
     --output "$OUTPUT" \
