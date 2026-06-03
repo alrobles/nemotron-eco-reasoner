@@ -1,10 +1,10 @@
 Bootstrap: docker
-From: nvidia/cuda:12.4.0-devel-ubuntu22.04
+From: kirakira2024/mamba2:ssm2.2.6_torch2.5_py3.11
 
 %labels
-    Author Angel Luis Robles Fernandez <a.l.robles.fernandez@gmail.com>
+    Author Angel Luis Robles Fernandez
     Description Nemotron-3-Nano training (CUDA 12.4, A100)
-    All packages from conda-forge — guaranteed compatibility
+    Base: kirakira2024/mamba2 — mamba-ssm 2.2.6 + PyTorch 2.5.1 pre-compiled
 
 %environment
     export HF_HUB_DISABLE_PROGRESS_BARS=1
@@ -13,53 +13,27 @@ From: nvidia/cuda:12.4.0-devel-ubuntu22.04
 %post
     set -e
 
-    # Install miniconda
-    apt-get update -qq && apt-get install -y -qq wget 2>&1 | tail -1
-    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
-    bash /tmp/miniconda.sh -b -p /opt/conda 2>&1 | tail -1
-    rm /tmp/miniconda.sh
-    export PATH=/opt/conda/bin:$PATH
+    echo "=== Base ==="
+    python3 -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
+    python3 -c "import mamba_ssm; print(f'mamba-ssm OK')"
+    python3 -c "import causal_conv1d; print(f'causal-conv1d {causal_conv1d.__version__}')"
 
-    # Accept conda ToS
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+    echo "=== Training stack ==="
+    pip install --quiet --progress-bar off --no-cache-dir \
+        transformers==4.57.6 \
+        peft==0.17.1 \
+        trl==0.24.0 \
+        datasets==4.5.0 \
+        accelerate==1.10.1 \
+        sentencepiece==0.2.1
 
-    # Install everything from conda-forge — torch + mamba-ssm as one atomic solve
-    # No version pins — let conda find the compatible combination
-    echo "=== Installing PyTorch + mamba-ssm via conda-forge ==="
-    conda install -y -c conda-forge --no-plugins \
-        python=3.10 \
-        pytorch \
-        mamba-ssm \
-        causal-conv1d \
-        transformers \
-        datasets \
-        accelerate \
-        peft \
-        sentencepiece 2>&1
-
-    # Verify core
-    python3 -c "
-import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')
-import mamba_ssm; print('mamba-ssm: OK')
-import causal_conv1d; print('causal-conv1d: OK')
-"
-
-    # TRL via pip (conda-forge version may be outdated)
-    pip install --quiet --progress-bar off --no-cache-dir trl==0.24.0
-
-    # Optional
-    pip install --quiet --progress-bar off --no-cache-dir wandb tensorboard
-
-    # Final verification
     echo "=== Verification ==="
     python3 -c "
-import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')
+import torch; print(f'PyTorch {torch.__version__}')
 import mamba_ssm; print('mamba-ssm: OK')
 import transformers; print(f'transformers {transformers.__version__}')
 import peft; print(f'peft {peft.__version__}')
 import trl; print(f'trl {trl.__version__}')
-import accelerate; print(f'accelerate {accelerate.__version__}')
 print('ALL CHECKS PASSED')
 "
 
