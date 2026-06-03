@@ -4,7 +4,7 @@ From: rocm/pytorch:rocm6.4.2_ubuntu22.04_py3.10_pytorch_release_2.6.0
 %labels
     Author Angel Luis Robles Fernandez <a.l.robles.fernandez@gmail.com>
     Description Nemotron-3-Nano BF16 LoRA/DoRA training (ROCm 6.4, MI210, PyTorch 2.6)
-    mamba-ssm Pre-installed (avoid runtime HIP compilation failures)
+    mamba-ssm Pre-compiled for gfx90a (MI210) — no runtime HIP compilation needed
 
 %environment
     export ROCM_TARGET=gfx90a
@@ -15,18 +15,29 @@ From: rocm/pytorch:rocm6.4.2_ubuntu22.04_py3.10_pytorch_release_2.6.0
     export PYTHONUNBUFFERED=1
 
 %post
-    # Build-time GPU target for HIP compilation (reumanlab has no AMD GPU)
+    set -e
+
+    # Build-time GPU target for HIP cross-compilation
+    # reumanlab has no AMD GPU — hipcc cross-compiles to gfx90a just fine
     export GPU_TARGETS=gfx90a
-    
+    export ROCM_TARGET=gfx90a
+    export HIP_PLATFORM=amd
+    export MAX_JOBS=4
+
     # Activate conda environment where torch is installed
     . /opt/conda/etc/profile.d/conda.sh
     conda activate py_3.10
 
-    # Build dependencies for mamba-ssm compilation
-    pip install --no-cache-dir packaging setuptools wheel ninja
+    echo "=== Python: $(python3 --version) ==="
+    echo "=== PyTorch: $(python3 -c 'import torch; print(torch.__version__)') ==="
 
-    # Training stack — single pip call for clean dependency resolution
-    pip install --no-cache-dir \
+    # Build dependencies for mamba-ssm compilation
+    # --quiet --progress-bar off: avoid Apptainer broken-pipe on pip progress bars
+    pip install --quiet --progress-bar off --no-cache-dir \
+        packaging setuptools wheel ninja
+
+    # Training stack
+    pip install --quiet --progress-bar off --no-cache-dir \
         transformers==4.57.6 \
         peft==0.17.1 \
         trl==0.24.0 \
@@ -36,15 +47,32 @@ From: rocm/pytorch:rocm6.4.2_ubuntu22.04_py3.10_pytorch_release_2.6.0
         wandb \
         tensorboard
 
-    # mamba-ssm + causal-conv1d — required by Nemotron hybrid Mamba layers
-    # HIP compilation targets MI210 (gfx90a)
-    # --no-build-isolation: use conda env's torch (pip isolation can't see conda)
-    pip install --no-cache-dir --no-build-isolation mamba-ssm causal-conv1d
+    # mamba-ssm — required by Nemotron-3-Nano hybrid Mamba layers
+    # --no-build-isolation: use conda env's torch (pip build isolation can't see conda)
+    # Compiled for gfx90a (MI210) via GPU_TARGETS env var
+    echo "=== Building mamba-ssm for gfx90a ==="
+    pip install --quiet --progress-bar off --no-cache-dir --no-build-isolation \
+        mamba-ssm 2>&1 | tail -5
+    python3 -c "import mamba_ssm; print('mamba-ssm OK')"
+
+    # causal-conv1d — optional, accelerates Mamba SSM convolution
+    # May fail on ROCm (CUDA-only), not critical — falls back to pure PyTorch
+    echo "=== Building causal-conv1d (best-effort) ==="
+    pip install --quiet --progress-bar off --no-cache-dir --no-build-isolation \
+        causal-conv1d 2>&1 | tail -5 || echo "causal-conv1d skipped (OK, fallback to PyTorch)"
 
     # Verify everything
-    python -c "import torch; print(f'PyTorch {torch.__version__}, ROCm: {torch.cuda.is_available()}')"
-    python -c "import mamba_ssm; print(f'mamba-ssm OK')"
-    python -c "import transformers, peft, trl; print('Training stack OK')"
+    echo "=== Verification ==="
+    python3 -c "
+import torch; print(f'PyTorch {torch.__version__}, ROCm {torch.version.hip}')
+import transformers; print(f'transformers {transformers.__version__}')
+import peft; print(f'peft {peft.__version__}')
+import trl; print(f'trl {trl.__version__}')
+import accelerate; print(f'accelerate {accelerate.__version__}')
+import mamba_ssm; print('mamba-ssm: OK')
+import datasets; print(f'datasets {datasets.__version__}')
+print('ALL CHECKS PASSED')
+"
 
 %runscript
-    exec python "$@"
+    exec python3 "$@"
