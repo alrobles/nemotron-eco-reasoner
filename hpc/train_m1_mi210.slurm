@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-CONTAINER=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-rocm.sif
+CONTAINER=/home/a474r867/scratch/nemotron-rocm.sif
 MODEL_DIR=/home/a474r867/scratch/nemotron-model-cache
 DATA=/home/a474r867/scratch/nemotron-eco-reasoner/data/kaggle_5k_train.jsonl
 OUTPUT=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/m1_run1
