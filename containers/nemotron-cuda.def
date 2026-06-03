@@ -40,14 +40,19 @@ From: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
         tensorboard
 
     # mamba-ssm + causal-conv1d — CUDA native compilation
-    # On CUDA, this is straightforward with nvcc
-    echo "=== Building mamba-ssm (CUDA) ==="
-    pip install --quiet --progress-bar off --no-cache-dir --no-build-isolation \
+    # --no-deps: CRITICAL — prevents pip from replacing torch.
+    #   The base image has torch 2.5.1; mamba-ssm tries to pull torch 2.12.0
+    #   as a dependency, which breaks the compiled CUDA extensions.
+    # --no-build-isolation: use the installed torch headers (not a temp venv)
+    echo "=== Building mamba-ssm (CUDA, --no-deps) ==="
+    pip install --quiet --progress-bar off --no-cache-dir \
+        --no-deps --no-build-isolation \
         mamba-ssm 2>&1 | tail -5
     python3 -c "import mamba_ssm; print('mamba-ssm OK')"
 
-    echo "=== Building causal-conv1d (CUDA) ==="
-    pip install --quiet --progress-bar off --no-cache-dir --no-build-isolation \
+    echo "=== Building causal-conv1d (CUDA, --no-deps) ==="
+    pip install --quiet --progress-bar off --no-cache-dir \
+        --no-deps --no-build-isolation \
         causal-conv1d 2>&1 | tail -5 || echo "causal-conv1d optional, continuing"
     python3 -c "import causal_conv1d; print('causal-conv1d OK')" 2>/dev/null || echo "(causal-conv1d not available — PyTorch fallback)"
 
