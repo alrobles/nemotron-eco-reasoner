@@ -1,10 +1,10 @@
 Bootstrap: docker
-From: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+From: nvidia/cuda:12.4.0-devel-ubuntu22.04
 
 %labels
     Author Angel Luis Robles Fernandez <a.l.robles.fernandez@gmail.com>
-    Description Nemotron-3-Nano BF16 LoRA/DoRA training (CUDA 12.4, A100)
-    mamba-ssm via conda-forge — zero compilation, pre-built binaries
+    Description Nemotron-3-Nano training (CUDA 12.4, A100)
+    All packages from conda-forge — guaranteed compatibility
 
 %environment
     export HF_HUB_DISABLE_PROGRESS_BARS=1
@@ -13,30 +13,40 @@ From: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
 %post
     set -e
 
-    echo "=== CUDA: $(nvcc --version 2>/dev/null | tail -1 || echo 'not found') ==="
-    echo "=== PyTorch: $(python3 -c 'import torch; print(torch.__version__)') ==="
+    # Install miniconda
+    apt-get update -qq && apt-get install -y -qq wget 2>&1 | tail -1
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
+    bash /tmp/miniconda.sh -b -p /opt/conda 2>&1 | tail -1
+    rm /tmp/miniconda.sh
+    export PATH=/opt/conda/bin:$PATH
 
-    # mamba-ssm from conda-forge — pre-compiled, zero dependency hell
-    # conda resolves torch/triton/cuda compatibility automatically
-    echo "=== Installing mamba-ssm via conda-forge ==="
-    conda install -y -c conda-forge mamba-ssm 2>&1 | tail -5
-    python3 -c "import mamba_ssm; print('mamba-ssm OK')"
+    # Install everything from conda-forge — torch + mamba-ssm as one atomic solve
+    echo "=== Installing PyTorch + mamba-ssm via conda-forge ==="
+    conda install -y -c conda-forge \
+        python=3.10 \
+        pytorch=2.5.1 \
+        pytorch-cuda=12.4 \
+        mamba-ssm \
+        causal-conv1d \
+        transformers \
+        datasets \
+        accelerate \
+        peft \
+        sentencepiece \
+        2>&1 | tail -10
 
-    # causal-conv1d — also via conda-forge
-    echo "=== Installing causal-conv1d via conda-forge ==="
-    conda install -y -c conda-forge causal-conv1d 2>&1 | tail -5 || echo "(optional, continuing)"
-    python3 -c "import causal_conv1d; print('causal-conv1d OK')" 2>/dev/null || echo "(not available)"
+    # Verify core
+    python3 -c "
+import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')
+import mamba_ssm; print('mamba-ssm: OK')
+import causal_conv1d; print('causal-conv1d: OK')
+"
 
-    # Training stack via pip (conda versions may be outdated)
-    pip install --quiet --progress-bar off --no-cache-dir \
-        transformers==4.57.6 \
-        peft==0.17.1 \
-        trl==0.24.0 \
-        datasets==4.5.0 \
-        accelerate==1.10.1 \
-        sentencepiece==0.2.1 \
-        wandb \
-        tensorboard
+    # TRL via pip (conda-forge version may be outdated)
+    pip install --quiet --progress-bar off --no-cache-dir trl==0.24.0
+
+    # Optional
+    pip install --quiet --progress-bar off --no-cache-dir wandb tensorboard
 
     # Final verification
     echo "=== Verification ==="
