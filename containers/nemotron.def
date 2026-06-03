@@ -3,16 +3,28 @@ From: rocm/pytorch:rocm6.4.2_ubuntu22.04_py3.10_pytorch_release_2.6.0
 
 %labels
     Author Angel Luis Robles Fernandez <a.l.robles.fernandez@gmail.com>
-    Description Nemotron-3-Nano BF16 LoRA/DoRA training (ROCm 6.3, MI210, PyTorch 2.6)
+    Description Nemotron-3-Nano BF16 LoRA/DoRA training (ROCm 6.4, MI210, PyTorch 2.6)
+    mamba-ssm Pre-installed (avoid runtime HIP compilation failures)
 
 %environment
     export ROCM_TARGET=gfx90a
     export HIP_PLATFORM=amd
     export TORCH_HIP_ARCH_LIST=gfx90a
+    export GPU_TARGETS=gfx90a
     export HF_HUB_DISABLE_PROGRESS_BARS=1
     export PYTHONUNBUFFERED=1
 
 %post
+    # Build-time GPU target for HIP compilation (reumanlab has no AMD GPU)
+    export GPU_TARGETS=gfx90a
+    
+    # Activate conda environment where torch is installed
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate py_3.10
+
+    # Build dependencies for mamba-ssm compilation
+    pip install --no-cache-dir packaging setuptools wheel ninja
+
     # Training stack — single pip call for clean dependency resolution
     pip install --no-cache-dir \
         transformers==4.57.6 \
@@ -24,8 +36,13 @@ From: rocm/pytorch:rocm6.4.2_ubuntu22.04_py3.10_pytorch_release_2.6.0
         wandb \
         tensorboard
 
-    # Verify GPU and stack
+    # mamba-ssm + causal-conv1d — required by Nemotron hybrid Mamba layers
+    # HIP compilation targets MI210 (gfx90a)
+    pip install --no-cache-dir mamba-ssm causal-conv1d
+
+    # Verify everything
     python -c "import torch; print(f'PyTorch {torch.__version__}, ROCm: {torch.cuda.is_available()}')"
+    python -c "import mamba_ssm; print(f'mamba-ssm OK')"
     python -c "import transformers, peft, trl; print('Training stack OK')"
 
 %runscript
