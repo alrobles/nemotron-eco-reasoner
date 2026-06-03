@@ -11,21 +11,25 @@
 # M1 Dual-GPU — Nemotron-3-Nano-30B + DoRA on 2× MI210 (FSDP full_shard)
 # 2× 64GB MI210 → 128GB total → ~30GB per GPU with FSDP full_shard
 # Container: nemotron-rocm.sif (torch 2.6.0 ROCm 6.4)
+#
+# CRITICAL: on compute nodes, $HOME=/kuhpc/scratch/kbs/a474r867 NOT /home/a474r867
+# All paths must use $HOME/scratch/... not /home/a474r867/scratch/...
 
 set -euo pipefail
 
-CONTAINER=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-rocm.sif
-MODEL_DIR=/home/a474r867/scratch/nemotron-model-cache
-DATA=/home/a474r867/scratch/nemotron-eco-reasoner/data/kaggle_5k_train.jsonl
-OUTPUT=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/m1_dual
-SCRIPTS=/home/a474r867/scratch/nemotron-eco-reasoner/scripts
-FSDP_CONFIG=/home/a474r867/scratch/nemotron-eco-reasoner/hpc/fsdp_config.yaml
+CONTAINER=$HOME/scratch/nemotron-eco-reasoner/nemotron-rocm.sif
+MODEL_DIR=$HOME/scratch/nemotron-model-cache
+DATA=$HOME/scratch/nemotron-eco-reasoner/data/kaggle_5k_train.jsonl
+OUTPUT=$HOME/scratch/nemotron-eco-reasoner/outputs/m1_dual
+SCRIPTS=$HOME/scratch/nemotron-eco-reasoner/scripts
+FSDP_CONFIG=$HOME/scratch/nemotron-eco-reasoner/hpc/fsdp_config.yaml
 TMPDIR=/tmp/nem_dual_$$
 
 mkdir -p $OUTPUT $TMPDIR
 
 echo "=== M1 Dual-GPU Training ==="
 echo "Nodes: $(hostname)"
+echo "HOME: $HOME"
 echo "GPUs requested: 2× MI210 (${SLURM_GPUS_ON_NODE:-2})"
 echo "Container: $CONTAINER"
 echo "Output: $OUTPUT"
