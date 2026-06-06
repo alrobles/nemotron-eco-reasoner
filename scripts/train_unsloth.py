@@ -37,7 +37,7 @@ for module in model.modules():
         continue
 
     def make_patched_moe(mod):
-        def patched_moe(hidden_states, topk_indices, topk_weights):
+        def patched_moe(_self, hidden_states, topk_indices, topk_weights):
             orig_shape = hidden_states.shape
             hidden_states = hidden_states.view(-1, hidden_states.size(-1))
             flat_topk_indices = topk_indices.view(-1)
