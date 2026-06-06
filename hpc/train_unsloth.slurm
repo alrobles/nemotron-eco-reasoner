@@ -5,7 +5,6 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=80G
 #SBATCH --cpus-per-task=8
-#SBATCH --nodelist=r31r05n01,r31r10n01,r31r15n01,r31r25n01
 #SBATCH --output=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/unsloth/train_%j.out
 #SBATCH --error=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/unsloth/train_%j.err
 
