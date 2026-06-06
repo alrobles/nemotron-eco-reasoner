@@ -87,8 +87,10 @@ apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
     --env LORA_RANK=32 \
     --env LORA_ALPHA=32 \
     --env MAX_STEPS=500 \
-    --env SAVE_STEPS=100 \
-    --env USE_FP16=0 \
+    --env SAVE_STEPS=50 \
+    --env USE_FP16=0 
+    --env LEARNING_RATE=5e-5 
+    --env GRAD_ACCUM=64 \
     $RESUME_ENV \
     "$CONTAINER" env PYTHONUNBUFFERED=1 python3 -u "$SCRIPT"
 

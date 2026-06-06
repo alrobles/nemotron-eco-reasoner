@@ -1,0 +1,22 @@
+/tmp/pip_4123037/lib/python3.11/site-packages/unsloth_zoo/__init__.py:404: UserWarning: Unsloth fused-forward install skipped: requires transformers >= 4.56.0.
+  _install_fused_forward()
+[unsloth_zoo.log|WARNING]Failed to patch FineGrainedFP8HfQuantizer. Error No module named 'transformers.quantizers.quantizer_finegrained_fp8'
+Traceback (most recent call last):
+  File "<string>", line 15, in <module>
+  File "/tmp/pip_4123037/lib/python3.11/site-packages/unsloth/__init__.py", line 165, in <module>
+    from ._gpu_init import *
+  File "/tmp/pip_4123037/lib/python3.11/site-packages/unsloth/_gpu_init.py", line 334, in <module>
+    from .models import *
+  File "/tmp/pip_4123037/lib/python3.11/site-packages/unsloth/models/__init__.py", line 15, in <module>
+    from .llama import FastLlamaModel
+  File "/tmp/pip_4123037/lib/python3.11/site-packages/unsloth/models/llama.py", line 78, in <module>
+    from ..tokenizer_utils import *
+  File "/tmp/pip_4123037/lib/python3.11/site-packages/unsloth/tokenizer_utils.py", line 1537, in <module>
+    import trl.trainer.sft_trainer
+  File "/opt/conda/lib/python3.11/site-packages/trl/trainer/sft_trainer.py", line 51, in <module>
+    from .base_trainer import BaseTrainer
+  File "/opt/conda/lib/python3.11/site-packages/trl/trainer/base_trainer.py", line 20, in <module>
+    from .utils import generate_model_card, get_comet_experiment_url
+  File "/opt/conda/lib/python3.11/site-packages/trl/trainer/utils.py", line 50, in <module>
+    from transformers.utils import (
+ImportError: cannot import name 'is_rich_available' from 'transformers.utils' (/tmp/pip_4123037/lib/python3.11/site-packages/transformers/utils/__init__.py)
