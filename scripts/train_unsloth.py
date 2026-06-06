@@ -1,30 +1,23 @@
 #!/usr/bin/env python3
 """Unsloth 4-bit QLoRA training for Nemotron-3-Nano-30B-A3B.
-Unsloth's FastLanguageModel handles the hybrid Mamba2+MoE+Attention
-architecture correctly, including num_logits_to_keep=1.
-
-Env vars: MODEL_PATH, DATA_PATH, OUT_PATH
-"""
+v2: monkey-patch MoE index_add_ dtype mismatch (bf16 vs fp32)."""
 
 import os, sys, json, time, torch
 from datasets import load_dataset
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
-
 torch.backends.cuda.matmul.allow_tf32 = True
 
 MODEL_PATH = os.environ["MODEL_PATH"]
 DATA_PATH = os.environ["DATA_PATH"]
 OUT_PATH = os.environ["OUT_PATH"]
-
 t0 = time.time()
 
-# ── GPU info ──────────────────────────────────────────────────────
+# ── GPU ───────────────────────────────────────────────────────────
 gpu = torch.cuda.get_device_name(0)
 vram = torch.cuda.get_device_properties(0).total_memory / 1e9
-ngpu = torch.cuda.device_count()
-print(f"GPU: {gpu} ({vram:.1f} GB) x{ngpu}")
+print(f"GPU: {gpu} ({vram:.1f} GB) x{torch.cuda.device_count()}")
 print(f"PyTorch: {torch.__version__}")
 
 # ── Unsloth ───────────────────────────────────────────────────────
@@ -32,13 +25,49 @@ from unsloth import FastLanguageModel
 
 print(f"Model: {MODEL_PATH}")
 print("Loading model (Unsloth 4-bit)...")
-
 model, tok = FastLanguageModel.from_pretrained(
     model_name=MODEL_PATH,
     max_seq_length=2048,
     load_in_4bit=True,
     trust_remote_code=True,
 )
+
+# ── Monkey-patch MoE index_add_ dtype ─────────────────────────────
+# Nemotron's MoE forward (modeling_nemotron_h.py:852) does:
+#   final_hidden_states.index_add_(0, token_indices, weighted_output)
+# where final_hidden_states is bf16 but weighted_output may be fp32.
+# Fix: cast weighted_output to match before index_add_.
+
+import transformers.models.nemotron_h.modeling_nemotron_h as nem_h
+
+
+def _patched_moe_forward(self, hidden_states, topk_indices, topk_weights):
+    """Patched MoE forward with dtype-safe index_add_."""
+    orig_shape = hidden_states.shape
+    hidden_states = hidden_states.view(-1, hidden_states.size(-1))
+    flat_topk_indices = topk_indices.view(-1)
+    hidden_states = hidden_states.repeat_interleave(
+        topk_indices.shape[-1], dim=0
+    )
+    final_hidden_states = torch.zeros_like(hidden_states)
+
+    for i, expert_layer in enumerate(self.experts):
+        expert_mask = (flat_topk_indices == i).nonzero(as_tuple=True)[0]
+        if expert_mask.numel() == 0:
+            continue
+        expert_hidden = hidden_states[expert_mask]
+        expert_output = expert_layer(expert_hidden)
+        weights = topk_weights.view(-1)[expert_mask]
+        weighted_output = (expert_output * weights.unsqueeze(-1)).to(
+            final_hidden_states.dtype
+        )
+        final_hidden_states.index_add_(0, expert_mask, weighted_output)
+
+    return final_hidden_states.view(*orig_shape)
+
+
+nem_h.NemotronHMixtureOfExperts.forward = _patched_moe_forward
+print("  MoE dtype patch applied")
 
 # ── LoRA ──────────────────────────────────────────────────────────
 model = FastLanguageModel.get_peft_model(
@@ -61,7 +90,6 @@ print(f"  {len(ds)} examples loaded")
 
 
 def fmt(ex):
-    """Convert prompt/answer to chat-template text."""
     msgs = ex.get("messages")
     if not msgs:
         msgs = [
@@ -110,14 +138,13 @@ trainer.train()
 elapsed = (time.time() - t0) / 60
 print(f"DONE in {elapsed:.1f} minutes")
 
-# ── Save ──────────────────────────────────────────────────────────
 os.makedirs(OUT_PATH, exist_ok=True)
 trainer.save_model(OUT_PATH)
 tok.save_pretrained(OUT_PATH)
 print(f"Adapter saved to {OUT_PATH}")
 
-# Quick manifest
 import json as _json
+
 manifest = {
     "model": MODEL_PATH,
     "data": DATA_PATH,
@@ -130,7 +157,7 @@ manifest = {
     "elapsed_min": elapsed,
     "gpu": gpu,
     "vram_gb": vram,
-    "framework": "unsloth-4bit-qlora",
+    "framework": "unsloth-4bit-qlora-moe-patched",
 }
 with open(os.path.join(OUT_PATH, "manifest.json"), "w") as f:
     _json.dump(manifest, f, indent=2)
