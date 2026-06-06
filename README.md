@@ -1,6 +1,6 @@
 # Nemotron Eco-Reasoner
 
-**🟢 TRAINING ACTIVE — Jun 5, 2026**  
+**🟢 TRAINING ACTIVE — Jun 5, 2026 | Step 10, Loss: 18.29, ~96s/it on A100 40GB**  
 First successful Nemotron-3-Nano-30B-A3B fine-tuning after 15+ iterations.  
 Using **Unsloth 4-bit QLoRA** on A100 40GB with monkey-patched MoE forward
 (dtype-safe index_add_ + top-k aggregation). See [CHANGELOG.md](CHANGELOG.md).
