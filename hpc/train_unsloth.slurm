@@ -5,6 +5,7 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=80G
 #SBATCH --cpus-per-task=8
+#SBATCH --nodelist=r31r05n01,r31r10n01,r31r15n01,r31r25n01
 #SBATCH --output=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/unsloth/train_%j.out
 #SBATCH --error=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/unsloth/train_%j.err
 
@@ -50,8 +51,9 @@ apptainer exec --nv --bind "$TMPDIR:/tmp" "$CONTAINER" bash -c "
     set -euo pipefail
     pip install --no-cache-dir -q mamba-ssm causal-conv1d 2>&1 | tail -3
     python3 -c 'import mamba_ssm; print(\"mamba-ssm OK\")'
-    pip install --no-cache-dir -q unsloth 2>&1 | tail -3
-    python3 -c 'import unsloth; print(\"unsloth OK\")'
+    pip install --no-cache-dir -q --no-deps unsloth 2>&1 | tail -3
+    python3 -c 'import unsloth; print(\"unsloth OK (torch untouched)\")'
+    python3 -c 'import torch; print(f\"torch: {torch.__version__}\")'
 "
 
 # ── Train ────────────────────────────────────────────────────────
