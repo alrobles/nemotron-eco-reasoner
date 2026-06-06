@@ -36,6 +36,8 @@ LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "32"))
 MAX_STEPS = int(os.environ.get("MAX_STEPS", "500"))
 USE_FP16 = os.environ.get("USE_FP16", "0") == "1"
 SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "100"))
+LEARNING_RATE = float(os.environ.get("LEARNING_RATE", "2e-4"))
+GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))
 t0 = time.time()
 
 # ── SIGUSR1 handler (graceful checkpoint save before walltime kill) ──
@@ -60,7 +62,7 @@ print(f"PyTorch: {torch.__version__}")
 from unsloth import FastLanguageModel
 
 print(f"Model: {MODEL_PATH}")
-print(f"Config: seq={MAX_SEQ_LEN}, rank={LORA_RANK}, alpha={LORA_ALPHA}, steps={MAX_STEPS}")
+print(f"Config: seq={MAX_SEQ_LEN}, rank={LORA_RANK}, alpha={LORA_ALPHA}, steps={MAX_STEPS}, lr={LEARNING_RATE}, grad_accum={GRAD_ACCUM}")
 print(f"Precision: {'fp16' if USE_FP16 else 'bf16'}")
 if RESUME_CHECKPOINT:
     print(f"Resume: {RESUME_CHECKPOINT}")
@@ -156,7 +158,7 @@ trainer = SFTTrainer(
     model=model,
     args=SFTConfig(
         output_dir=OUT_PATH, max_steps=MAX_STEPS, per_device_train_batch_size=1,
-        gradient_accumulation_steps=8, learning_rate=2e-4, max_seq_length=MAX_SEQ_LEN,
+        gradient_accumulation_steps=GRAD_ACCUM, learning_rate=LEARNING_RATE, max_seq_length=MAX_SEQ_LEN,
         warmup_steps=50, logging_steps=10, save_steps=SAVE_STEPS, save_total_limit=3,
         bf16=not USE_FP16, fp16=USE_FP16,
         remove_unused_columns=False, report_to="none",
