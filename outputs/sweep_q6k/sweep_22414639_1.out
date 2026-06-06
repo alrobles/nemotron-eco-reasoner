@@ -1,0 +1,21 @@
+=== SWEEP TASK 1: seq=128 rank=8 lr=1e-4 ===
+=== Install deps ===
+torch: 2.5.1+cu124
+=== Training seq=128 r=8 lr=1e-4 ===
+GPU: Quadro RTX 6000 (25.2 GB) | seq=128 r=8 lr=0.0001
+🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
+🦥 Unsloth Zoo will now patch everything to make training faster!
+Unsloth: WARNING `trust_remote_code` is True.
+Are you certain you want to do remote code execution?
+==((====))==  Unsloth 2026.6.1: Fast Nemotron_H patching. Transformers: 4.57.6.
+   \\   /|    Quadro RTX 6000. Num GPUs = 1. Max memory: 23.46 GB. Platform: Linux.
+O^O/ \_/ \    Torch: 2.5.1+cu124. CUDA: 7.5. CUDA Toolkit: 12.4. Triton: 3.1.0
+\        /    Bfloat16 = FALSE. FA [Xformers = None. FA2 = False]
+ "-____-"     Free license: http://github.com/unslothai/unsloth
+/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848 does not have a padding token! Will use pad_token = <SPECIAL_999>.
+MoE: 23
+Unsloth: Detected MoE model with num_experts = 128 and target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'in_proj', 'out_proj', 'up_proj', 'down_proj']. Enabling LoRA on MoE parameters: ['mlp.experts.gate_up_proj', 'mlp.experts.down_proj']
+Unsloth: PEFT set target_parameters but found no matching parameters.
+This is expected for MoE models - Unsloth handles MoE expert LoRA targeting separately.
+trainable params: 220,968,448 || all params: 31,798,905,792 || trainable%: 0.6949
+Exit: 1

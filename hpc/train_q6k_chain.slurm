@@ -24,7 +24,7 @@ export TORCH_COMPILE_DISABLE=1
 
 CONTAINER=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-cuda.sif
 MODEL_PATH=/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848
-DATA=/home/a474r867/scratch/nemotron-eco-reasoner/data/train_final.jsonl
+DATA=/home/a474r867/scratch/nemotron-eco-reasoner/data/train_final_v2.jsonl
 OUT=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/q6k_chain
 SCRIPT=/home/a474r867/scratch/nemotron-eco-reasoner/scripts/train_unsloth.py
 TMPDIR=/tmp/nem_q6k_$$

@@ -1,0 +1,37 @@
+Unsloth: Tokenizing ["text"] (num_proc=28):   0%|          | 0/7086 [00:00<?, ? examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):   4%|▎         | 254/7086 [00:22<09:58, 11.41 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):   7%|▋         | 507/7086 [00:23<04:18, 25.50 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  14%|█▍        | 1014/7086 [00:24<01:33, 64.98 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  18%|█▊        | 1267/7086 [00:25<01:07, 85.92 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  21%|██▏       | 1520/7086 [00:25<00:47, 117.01 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  29%|██▊       | 2026/7086 [00:26<00:26, 187.51 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  32%|███▏      | 2279/7086 [00:27<00:24, 192.56 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  39%|███▉      | 2785/7086 [00:28<00:15, 282.01 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  43%|████▎     | 3038/7086 [00:28<00:13, 306.82 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  46%|████▋     | 3291/7086 [00:29<00:11, 339.26 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  50%|█████     | 3544/7086 [00:29<00:10, 350.40 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  54%|█████▎    | 3797/7086 [00:30<00:08, 384.08 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  61%|██████    | 4303/7086 [00:30<00:05, 505.82 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  64%|██████▍   | 4556/7086 [00:32<00:08, 296.80 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  75%|███████▌  | 5315/7086 [00:33<00:03, 487.95 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  79%|███████▊  | 5568/7086 [00:36<00:05, 272.83 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  86%|████████▌ | 6074/7086 [00:36<00:02, 364.98 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28): 100%|██████████| 7086/7086 [00:48<00:00, 147.14 examples/s]
+Unsloth: Packing train dataset (num_proc=28):   0%|          | 0/7086 [00:00<?, ? examples/s]Unsloth: Packing train dataset (num_proc=28):   4%|▎         | 253/7086 [00:20<09:18, 12.24 examples/s]Unsloth: Packing train dataset (num_proc=28):   7%|▋         | 506/7086 [00:21<03:54, 28.10 examples/s]Unsloth: Packing train dataset (num_proc=28):  11%|█         | 759/7086 [00:21<02:03, 51.24 examples/s]Unsloth: Packing train dataset (num_proc=28):  14%|█▍        | 1012/7086 [00:21<01:12, 83.39 examples/s]Unsloth: Packing train dataset (num_proc=28):  18%|█▊        | 1265/7086 [00:21<00:46, 124.97 examples/s]Unsloth: Packing train dataset (num_proc=28):  21%|██▏       | 1519/7086 [00:22<00:32, 170.33 examples/s]Unsloth: Packing train dataset (num_proc=28):  29%|██▊       | 2025/7086 [00:22<00:17, 286.12 examples/s]Unsloth: Packing train dataset (num_proc=28): 100%|██████████| 7086/7086 [00:34<00:00, 203.14 examples/s]
+  0%|          | 0/100 [00:00<?, ?it/s]Traceback (most recent call last):
+  File "<string>", line 68, in <module>
+  File "/tmp/unsloth_compiled_cache/UnslothSFTTrainer.py", line 84, in wrapper
+    output = f(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/transformers/trainer.py", line 2325, in train
+    return inner_training_loop(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/transformers/trainer.py", line 2674, in _inner_training_loop
+    tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/unsloth_compiled_cache/UnslothSFTTrainer.py", line 1400, in training_step
+    return super().training_step(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 91, in _unsloth_training_step
+  File "/opt/conda/lib/python3.11/site-packages/accelerate/accelerator.py", line 2730, in backward
+    self.scaler.scale(loss).backward(**kwargs)
+  File "/opt/conda/lib/python3.11/site-packages/torch/_tensor.py", line 581, in backward
+    torch.autograd.backward(
+  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/__init__.py", line 347, in backward
+    _engine_run_backward(
+  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/graph.py", line 825, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/function.py", line 307, in apply
+    return user_fn(self, *args)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/utils/checkpoint.py", line 321, in backward
+    torch.autograd.backward(outputs_with_grad, args_with_grad)
+  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/__init__.py", line 347, in backward
+    _engine_run_backward(
+  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/graph.py", line 825, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 MiB. GPU 0 has a total capacity of 23.46 GiB of which 1024.00 KiB is free. Including non-PyTorch memory, this process has 23.46 GiB memory in use. Of the allocated memory 22.00 GiB is allocated by PyTorch, and 144.12 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
