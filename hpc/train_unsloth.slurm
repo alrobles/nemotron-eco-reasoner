@@ -9,11 +9,10 @@
 #SBATCH --error=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/unsloth/train_%j.err
 
 # === Unsloth 4-bit QLoRA — Nemotron-3-Nano-30B-A3B ===
-# FIX v3: PYTHONUSERBASE=/tmp/pip_$$ to isolate from ~/.local contamination
-# FIX v2: --no-deps on unsloth to prevent torch 2.5.1 → 2.10.0 upgrade
+# FIX v7: ALL deps in one shot — datasets, mamba-ssm, bitsandbytes, unsloth+zoo
+# Isolated PYTHONUSERBASE, torch untouched at 2.5.1
 
 set -euo pipefail
-
 export TORCH_COMPILE_DISABLE=1
 
 CONTAINER=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-cuda.sif
@@ -27,42 +26,39 @@ PIPBASE=/tmp/pip_$$
 mkdir -p "$OUT" "$TMPDIR" "$PIPBASE"
 
 echo "===== Unsloth Training $(date) ====="
-echo "Model:  $MODEL_PATH"
-echo "Data:   $DATA"
-echo "Output: $OUT"
-echo "====================================="
 
-# ── GPU check ────────────────────────────────────────────────────
-echo ""
+# ── GPU check ────────────────────────────────────────
 echo "--- GPU check ---"
 apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
     --env PYTHONUSERBASE="$PIPBASE" \
     "$CONTAINER" python3 -c "
-import torch
-print(f'PyTorch: {torch.__version__}')
-print(f'CUDA available: {torch.cuda.is_available()}')
-print(f'GPU: {torch.cuda.get_device_name(0)}')
-print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory/1e9:.1f} GB')
-print(f'GPU count: {torch.cuda.device_count()}')
+import torch; print(f'PyTorch {torch.__version__} | GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory/1e9:.1f}GB)')
 "
 
-# ── Install deps (isolated to PIPBASE) ───────────────────────────
-echo ""
-echo "--- Installing mamba-ssm + unsloth (--no-deps, isolated) ---"
+# ── Install ALL deps (isolated, torch untouched) ────
+echo "--- Installing deps ---"
 apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
     --env PYTHONUSERBASE="$PIPBASE" \
-    "$CONTAINER" bash -c "
-    set -euo pipefail
-    pip install --user --no-cache-dir -q "datasets==4.3.0" 2>&1 | tail -1
-    pip install --user --no-cache-dir -q mamba-ssm causal-conv1d 2>&1 | tail -1
-    python3 -c 'import mamba_ssm; print("mamba-ssm OK")'
-    pip install --user --no-cache-dir -q --no-deps unsloth unsloth_zoo 2>&1 | tail -1
-    python3 -c 'import unsloth; print("unsloth OK")'
-    python3 -c 'import torch; print(f\"torch: {torch.__version__}\")'
-"
+    "$CONTAINER" bash -c '
+set -euo pipefail
+pip install --user --no-cache-dir -q \
+    "datasets==4.3.0" \
+    mamba-ssm causal-conv1d \
+    bitsandbytes \
+    unsloth_zoo \
+    2>&1 | tail -3
 
-# ── Train ────────────────────────────────────────────────────────
-echo ""
+# unsloth must be --no-deps to prevent torch upgrade
+pip install --user --no-cache-dir -q --no-deps unsloth 2>&1 | tail -1
+
+echo "--- Verifying imports ---"
+python3 -c "import mamba_ssm; print(\"mamba-ssm OK\")"
+python3 -c "import bitsandbytes; print(\"bitsandbytes OK\")"
+python3 -c "import unsloth; print(\"unsloth OK\")"
+python3 -c "import torch; print(f\"torch: {torch.__version__}\")"
+'
+
+# ── Train ────────────────────────────────────────────
 echo "--- Training ---"
 apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
     --env TORCH_COMPILE_DISABLE=1 \
@@ -73,16 +69,12 @@ apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
     "$CONTAINER" python3 -u "$SCRIPT"
 
 EXIT=$?
-echo ""
 echo "Exit code: $EXIT"
 
 if [ $EXIT -eq 0 ]; then
-    echo "SUCCESS!"
-    echo "Adapter: $OUT/"
+    echo "SUCCESS! Adapter: $OUT/"
     find "$OUT" -name "*.safetensors" -ls 2>/dev/null || true
-    find "$OUT" -name "manifest.json" -exec cat {} \; 2>/dev/null || true
 else
     echo "FAILED with exit $EXIT"
 fi
-
 rm -rf "$TMPDIR" "$PIPBASE"
