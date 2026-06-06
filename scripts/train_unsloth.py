@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Unsloth 4-bit QLoRA training for Nemotron-3-Nano-30B-A3B.
-v2: monkey-patch MoE index_add_ dtype mismatch (bf16 vs fp32)."""
+v3: monkey-patch MoE via instance iteration (avoids import of trust_remote_code module)."""
 
-import os, sys, json, time, torch
+import os, sys, json, time, types, torch
 from datasets import load_dataset
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -32,42 +32,49 @@ model, tok = FastLanguageModel.from_pretrained(
     trust_remote_code=True,
 )
 
-# ── Monkey-patch MoE index_add_ dtype ─────────────────────────────
-# Nemotron's MoE forward (modeling_nemotron_h.py:852) does:
-#   final_hidden_states.index_add_(0, token_indices, weighted_output)
-# where final_hidden_states is bf16 but weighted_output may be fp32.
-# Fix: cast weighted_output to match before index_add_.
+# ── Monkey-patch MoE instances ────────────────────────────────────
+# Nemotron-H MoE forward does index_add_ with mixed dtypes (bf16 vs fp32).
+# Iterate model.modules() to find MoE layers and patch at instance level.
 
-import transformers.models.nemotron_h.modeling_nemotron_h as nem_h
+_patched_count = 0
+for module in model.modules():
+    clsname = type(module).__name__
+    if "MixtureOfExperts" not in clsname and "MoE" not in clsname:
+        continue
+    if not hasattr(module, "experts"):
+        continue
 
+    def make_patched_forward(mod):
+        def patched_forward(hidden_states, topk_indices, topk_weights):
+            orig_shape = hidden_states.shape
+            hidden_states = hidden_states.view(-1, hidden_states.size(-1))
+            flat_topk_indices = topk_indices.view(-1)
+            hidden_states = hidden_states.repeat_interleave(
+                topk_indices.shape[-1], dim=0
+            )
+            final_hidden_states = torch.zeros_like(hidden_states)
+            dtype = final_hidden_states.dtype
 
-def _patched_moe_forward(self, hidden_states, topk_indices, topk_weights):
-    """Patched MoE forward with dtype-safe index_add_."""
-    orig_shape = hidden_states.shape
-    hidden_states = hidden_states.view(-1, hidden_states.size(-1))
-    flat_topk_indices = topk_indices.view(-1)
-    hidden_states = hidden_states.repeat_interleave(
-        topk_indices.shape[-1], dim=0
-    )
-    final_hidden_states = torch.zeros_like(hidden_states)
+            for i, expert_layer in enumerate(mod.experts):
+                expert_mask = (flat_topk_indices == i).nonzero(as_tuple=True)[0]
+                if expert_mask.numel() == 0:
+                    continue
+                expert_hidden = hidden_states[expert_mask]
+                expert_output = expert_layer(expert_hidden)
+                weights = topk_weights.view(-1)[expert_mask]
+                weighted_output = expert_output * weights.unsqueeze(-1)
+                if weighted_output.dtype != dtype:
+                    weighted_output = weighted_output.to(dtype)
+                final_hidden_states.index_add_(0, expert_mask, weighted_output)
 
-    for i, expert_layer in enumerate(self.experts):
-        expert_mask = (flat_topk_indices == i).nonzero(as_tuple=True)[0]
-        if expert_mask.numel() == 0:
-            continue
-        expert_hidden = hidden_states[expert_mask]
-        expert_output = expert_layer(expert_hidden)
-        weights = topk_weights.view(-1)[expert_mask]
-        weighted_output = (expert_output * weights.unsqueeze(-1)).to(
-            final_hidden_states.dtype
-        )
-        final_hidden_states.index_add_(0, expert_mask, weighted_output)
+            return final_hidden_states.view(*orig_shape)
 
-    return final_hidden_states.view(*orig_shape)
+        return patched_forward
 
+    module.forward = types.MethodType(make_patched_forward(module), module)
+    _patched_count += 1
 
-nem_h.NemotronHMixtureOfExperts.forward = _patched_moe_forward
-print("  MoE dtype patch applied")
+print(f"  MoE dtype patch applied to {_patched_count} layers")
 
 # ── LoRA ──────────────────────────────────────────────────────────
 model = FastLanguageModel.get_peft_model(
