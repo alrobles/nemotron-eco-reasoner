@@ -55,8 +55,8 @@ apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
     set -euo pipefail
     pip install --user --no-cache-dir -q mamba-ssm causal-conv1d 2>&1 | tail -3
     python3 -c 'import mamba_ssm; print(\"mamba-ssm OK\")'
-    pip install --user --no-cache-dir -q --no-deps unsloth 2>&1 | tail -3
-    python3 -c 'import unsloth; print(\"unsloth OK\")'
+    pip install --user --no-cache-dir -q --no-deps unsloth unsloth_zoo 2>&1 | tail -3
+    python3 -c 'import unsloth; print("unsloth OK")'
     python3 -c 'import torch; print(f\"torch: {torch.__version__}\")'
 "
 
