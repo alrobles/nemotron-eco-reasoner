@@ -1,10 +1,19 @@
 #!/bin/bash
 # === Continuous Multi-node Training Chain ===
-# Chains 6h jobs via Slurm array. Each auto-resumes from prior checkpoint.
-# Usage: sbatch hpc/train_unsloth_chain.slurm   |   scancel <jobid> to stop
+# Chains 6h jobs via Slurm job dependency. Each job auto-resumes
+# from the previous checkpoint. Runs until manually cancelled.
+#
+# Usage:
+#   sbatch hpc/train_unsloth_chain.slurm          # Start chain
+#   scancel <jobid>                                # Stop chain
+#
+# Job 1 (array task 0): Fresh training, 0-6h
+# Job 2 (array task 1): Resume from job 1 checkpoint, 6-12h
+# Job 3 (array task 2): Resume from job 2 checkpoint, 12-18h
+# ... continues indefinitely until cancelled
 
 #SBATCH --job-name=nem-chain
-#SBATCH --array=0-9%1
+#SBATCH --array=0-9%1           # 10 jobs max, one at a time
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=2
 #SBATCH --gres=gpu:a100:2
@@ -29,25 +38,30 @@ PIPBASE=/tmp/pip_$$
 
 ARRAY_TASK=${SLURM_ARRAY_TASK_ID:-0}
 
+# Determine resume mode
 if [ "$ARRAY_TASK" -eq 0 ]; then
     RESUME_MODE=""
     echo "=== Chain Job 0: Fresh training ==="
 else
+    # Resume from latest checkpoint
     LATEST=$(ls -dt "$OUT"/checkpoint-* 2>/dev/null | head -1 || echo "")
     if [ -n "$LATEST" ]; then
         RESUME_MODE="--env RESUME_CHECKPOINT=$LATEST"
-        echo "=== Chain Job $ARRAY_TASK: Resume from $LATEST ==="
+        echo "=== Chain Job $ARRAY_TASK: Resuming from $LATEST ==="
     else
         RESUME_MODE="--env RESUME_CHECKPOINT=True"
-        echo "=== Chain Job $ARRAY_TASK: Auto-resume ==="
+        echo "=== Chain Job $ARRAY_TASK: Auto-resume (no specific checkpoint found) ==="
     fi
 fi
 
 mkdir -p "$OUT" "$TMPDIR" "$PIPBASE"
 MASTER_NODE=$(scontrol show hostnames $SLURM_NODELIST | head -1)
 TOTAL_GPUS=$((SLURM_NTASKS_PER_NODE * SLURM_NNODES))
-echo "Nodes: $SLURM_NNODES x $SLURM_NTASKS_PER_NODE = $TOTAL_GPUS GPUs | Master: $MASTER_NODE"
 
+echo "Nodes: $SLURM_NNODES × $SLURM_NTASKS_PER_NODE = $TOTAL_GPUS GPUs"
+echo "Master: $MASTER_NODE | Array: $ARRAY_TASK"
+
+# ── Install deps ─────────────────────────────────────────────────
 srun --ntasks=1 --nodes=$SLURM_NNODES bash -c "
     mkdir -p $PIPBASE
     apptainer exec --nv --bind $TMPDIR:/tmp,$PIPBASE:$PIPBASE \
@@ -58,6 +72,8 @@ srun --ntasks=1 --nodes=$SLURM_NNODES bash -c "
     '
 "
 
+# ── Launch ────────────────────────────────────────────────────────
+echo "--- torchrun $TOTAL_GPUS processes ---"
 srun --ntasks=$TOTAL_GPUS --nodes=$SLURM_NNODES \
     apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
         --env PYTHONUSERBASE="$PIPBASE" \
@@ -66,13 +82,25 @@ srun --ntasks=$TOTAL_GPUS --nodes=$SLURM_NNODES \
         --env DATA_PATH="$DATA" \
         --env OUT_PATH="$OUT" \
         $RESUME_MODE \
-        "$CONTAINER" \
-        torchrun \
-            --nnodes=$SLURM_NNODES --nproc_per_node=$SLURM_NTASKS_PER_NODE \
-            --master_addr=$MASTER_NODE --master_port=29501 \
-            --rdzv_backend=c10d --rdzv_endpoint=$MASTER_NODE:29501 \
+        "$CONTAINER" env PYTHONUNBUFFERED=1 \
+                torchrun \
+            --nnodes=$SLURM_NNODES \
+            --nproc_per_node=$SLURM_NTASKS_PER_NODE \
+            --master_addr=$MASTER_NODE \
+            --master_port=29501 \
+            --rdzv_backend=c10d \
+            --rdzv_endpoint=$MASTER_NODE:29501 \
             "$SCRIPT"
 
 EXIT=$?
 echo "Chain job $ARRAY_TASK exit: $EXIT"
+
+if [ $EXIT -eq 0 ]; then
+    echo "SUCCESS! Training complete after $ARRAY_TASK jobs ($((ARRAY_TASK * 6))h)"
+    # Exit successfully — Slurm won't spawn more array tasks if we use singleton
+    # For continuous: just let it exit, next array task auto-starts
+else
+    echo "Chain stopped with exit $EXIT"
+fi
+
 rm -rf "$TMPDIR"

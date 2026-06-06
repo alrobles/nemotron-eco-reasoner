@@ -9,7 +9,7 @@
 #SBATCH --error=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/unsloth/train_%j.err
 
 # === Unsloth 4-bit QLoRA — Nemotron-3-Nano-30B-A3B ===
-# v9: fix bash quoting — heredoc instead of bash -c, ALL --no-deps
+# v9: fix bash quoting bug (no single quotes inside bash -c '...')
 
 set -euo pipefail
 export TORCH_COMPILE_DISABLE=1
@@ -55,7 +55,7 @@ apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
     --env MODEL_PATH="$MODEL_PATH" \
     --env DATA_PATH="$DATA" \
     --env OUT_PATH="$OUT" \
-    "$CONTAINER" python3 -u "$SCRIPT"
+    "$CONTAINER" env PYTHONUNBUFFERED=1 python3 -u "$SCRIPT"
 
 EXIT=$?
 echo "Exit code: $EXIT"
