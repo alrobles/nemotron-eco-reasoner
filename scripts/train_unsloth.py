@@ -55,7 +55,7 @@ for module in model.modules():
                 if weighted_output.dtype != dtype:
                     weighted_output = weighted_output.to(dtype)
                 final_hidden_states.index_add_(0, expert_mask, weighted_output)
-            return final_hidden_states.view(*orig_shape)
+            return final_hidden_states
         return patched_moe
 
     module.moe = types.MethodType(make_patched_moe(module), module)
