@@ -55,6 +55,8 @@ for module in model.modules():
                 if weighted_output.dtype != dtype:
                     weighted_output = weighted_output.to(dtype)
                 final_hidden_states.index_add_(0, expert_mask, weighted_output)
+            top_k = topk_indices.shape[-1]
+            final_hidden_states = final_hidden_states.view(-1, top_k, final_hidden_states.size(-1)).sum(dim=1)
             return final_hidden_states
         return patched_moe
 
