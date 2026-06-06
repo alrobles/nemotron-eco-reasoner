@@ -1,6 +1,11 @@
 # Nemotron Eco-Reasoner
 
-Dual-purpose DoRA fine-tuning of NVIDIA Nemotron-3-Nano-30B-A3B for:
+**🟢 TRAINING ACTIVE — Jun 5, 2026**  
+First successful Nemotron-3-Nano-30B-A3B fine-tuning after 15+ iterations.  
+Using **Unsloth 4-bit QLoRA** on A100 40GB with monkey-patched MoE forward
+(dtype-safe index_add_ + top-k aggregation). See [CHANGELOG.md](CHANGELOG.md).
+
+Dual-purpose fine-tuning for:
 
 1. **Reasoning puzzles** — Kaggle [NVIDIA Nemotron Model Reasoning Challenge](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/) (deadline: June 15, 2026)
 2. **Ecological agent tasks** — ecoSeek scientific assistant (tool-calling, taxonomy, host-parasite extraction)
@@ -10,10 +15,11 @@ One model, two capabilities. Trained on a combined dataset: 50% Kaggle logic puz
 ## Architecture
 
 - **Base model:** Nemotron-3-Nano-30B-A3B-BF16 (30B total, ~3B active per token)
-- **Method:** DoRA (Weight-Decomposed Low-Rank Adaptation), rank 32, BF16
-- **Hardware:** MI210 64GB via Apptainer ROCm container (primary), A100 80GB (fallback)
-- **Framework:** PyTorch 2.6 ROCm + transformers 4.57 + peft + trl
-- **Container:** Pre-built Apptainer SIF (`nemotron-rocm.sif`, 21GB) — see [containers/README.md](containers/README.md)
+- **Method:** Unsloth 4-bit QLoRA, rank 32, BF16 compute — the only approach that works
+- **MoE fix:** Custom monkey-patch for dtype-safe `index_add_` + top-k aggregation (Nemotron routes to 6 experts per token; vanilla bitsandbytes fails with shape/dtype mismatches)
+- **Hardware:** A100 40GB (single GPU) — 4-bit model fits in ~16-20GB VRAM
+- **Framework:** Unsloth 2026.6.1 + transformers 4.57 + TRL + PyTorch 2.5.1 (CUDA 12.4)
+- **Container:** Pre-built Apptainer SIF (`nemotron-cuda.sif`, 7GB) with isolated PYTHONUSERBASE for deps
 
 ## Quick Start
 
