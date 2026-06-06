@@ -9,8 +9,9 @@
 #SBATCH --error=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/unsloth/train_%j.err
 
 # === Unsloth 4-bit QLoRA — Nemotron-3-Nano-30B-A3B ===
-# FIX v7: ALL deps in one shot — datasets, mamba-ssm, bitsandbytes, unsloth+zoo
-# Isolated PYTHONUSERBASE, torch untouched at 2.5.1
+# FIX v8: ALL --no-deps to prevent transitive deps (torchao, etc.)
+# Only exceptions: mamba-ssm (needs compiled ext) and datasets (self-contained)
+# Everything isolated via PYTHONUSERBASE, torch pinned at 2.5.1
 
 set -euo pipefail
 export TORCH_COMPILE_DISABLE=1
@@ -28,34 +29,36 @@ mkdir -p "$OUT" "$TMPDIR" "$PIPBASE"
 echo "===== Unsloth Training $(date) ====="
 
 # ── GPU check ────────────────────────────────────────
-echo "--- GPU check ---"
+echo "--- GPU ---"
 apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
     --env PYTHONUSERBASE="$PIPBASE" \
     "$CONTAINER" python3 -c "
 import torch; print(f'PyTorch {torch.__version__} | GPU: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory/1e9:.1f}GB)')
 "
 
-# ── Install ALL deps (isolated, torch untouched) ────
-echo "--- Installing deps ---"
+# ── Install ALL deps (ALL --no-deps, torch untouched) ────
+echo "--- Installing deps (all --no-deps) ---"
 apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
     --env PYTHONUSERBASE="$PIPBASE" \
     "$CONTAINER" bash -c '
 set -euo pipefail
-pip install --user --no-cache-dir -q \
-    "datasets==4.3.0" \
-    mamba-ssm causal-conv1d \
-    bitsandbytes \
-    unsloth_zoo \
-    2>&1 | tail -3
 
-# unsloth must be --no-deps to prevent torch upgrade
+# datasets: downgrade for unsloth compat (self-contained, no dangerous deps)
+pip install --user --no-cache-dir -q "datasets==4.3.0" 2>&1 | tail -1
+
+# mamba-ssm: needs its compiled ext, allow deps
+pip install --user --no-cache-dir -q mamba-ssm causal-conv1d 2>&1 | tail -1
+
+# These ALL get --no-deps to prevent torch/torchao/other upgrades:
+pip install --user --no-cache-dir -q --no-deps bitsandbytes 2>&1 | tail -1
+pip install --user --no-cache-dir -q --no-deps unsloth_zoo 2>&1 | tail -1
 pip install --user --no-cache-dir -q --no-deps unsloth 2>&1 | tail -1
 
-echo "--- Verifying imports ---"
-python3 -c "import mamba_ssm; print(\"mamba-ssm OK\")"
-python3 -c "import bitsandbytes; print(\"bitsandbytes OK\")"
-python3 -c "import unsloth; print(\"unsloth OK\")"
-python3 -c "import torch; print(f\"torch: {torch.__version__}\")"
+echo "--- Verifying ---"
+python3 -c "import mamba_ssm; print('mamba-ssm OK')"
+python3 -c "import bitsandbytes; print('bitsandbytes OK')"
+python3 -c "import unsloth; print('unsloth OK')"
+python3 -c "import torch; print(f'torch: {torch.__version__}')"
 '
 
 # ── Train ────────────────────────────────────────────
@@ -70,7 +73,6 @@ apptainer exec --nv --bind "$TMPDIR:/tmp,$PIPBASE:$PIPBASE" \
 
 EXIT=$?
 echo "Exit code: $EXIT"
-
 if [ $EXIT -eq 0 ]; then
     echo "SUCCESS! Adapter: $OUT/"
     find "$OUT" -name "*.safetensors" -ls 2>/dev/null || true
