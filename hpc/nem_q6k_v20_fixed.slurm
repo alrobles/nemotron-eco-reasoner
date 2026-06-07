@@ -56,11 +56,12 @@ apptainer exec --nv --bind "/dev/shm,/tmp:$P" \
     --env HF_HUB_DISABLE_TELEMETRY=1 --env HF_DATASETS_OFFLINE=1 \
     "$C" bash << 'INSTALL_EOF'
 set -euo pipefail
-pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1
-pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1
+# Q6000 deps only — NO mamba-ssm/causal-conv1d (those pull CUDA deps, break on r22/r15)
 pip install --user --no-cache-dir -q --no-deps "datasets==4.3.0" bitsandbytes 2>&1 | tail -1
-pip install --user --no-cache-dir -q --no-deps unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1
-python3 -c 'import torch,transformers,tokenizers,trl; print(f"tf:{transformers.__version__} tok:{tokenizers.__version__} trl:{trl.__version__}")'
+pip install --user --no-cache-dir -q --no-deps unsloth_zoo unsloth 2>&1 | tail -1
+pip uninstall -y torchao 2>/dev/null || true
+python3 -c 'import torch; print(f"torch:{torch.__version__} path:{torch.__file__}")'
+python3 -c 'import datasets,transformers; print(f"ds:{datasets.__version__} tf:{transformers.__version__}")'
 python3 -c 'import unsloth; from trl import SFTTrainer; print("unsloth+trl OK")'
 INSTALL_EOF
 
