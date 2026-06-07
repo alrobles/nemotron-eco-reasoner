@@ -1,11 +1,12 @@
 #!/bin/bash
 # === nem_q6k_v20_fixed.slurm — Q6000 LoRA training with HF offline protection ===
-# Fixes:
-#   1. HF_HUB_OFFLINE=1 + TRANSFORMERS_OFFLINE=1 — block all HF network calls
+# Fixes (v2):
+#   1. HF_HUB_OFFLINE=1 + TRANSFORMERS_OFFLINE=1 + HF_DATASETS_OFFLINE=1 — block all HF network calls
 #   2. local_files_only=True in from_pretrained() — prevents Unsloth telemetry HF calls
-#   3. Removed UNSLOTH_USE_MODELSCOPE (Nemotron not on ModelScope, red herring)
-#   4. Removed torch reinstall (container has 2.5.1+cu124, good enough)
-#   5. local_files_only in tok.save_pretrained()
+#   3. Removed mamba-ssm/causal-conv1d (A100-only deps, break Q6000)
+#   4. Removed explicit trl/transformers/tokenizers installs (container has them)
+#   5. --mem=128G (was 62G, fixes OOM) + --exclude=r22r05n01 (node missing libcudnn.so.9)
+#   6. local_files_only in tok.save_pretrained()
 #
 # Usage:
 #   SEQ_LEN=48 LORA_RANK=8 sbatch hpc/nem_q6k_v20_fixed.slurm
@@ -15,10 +16,11 @@
 #SBATCH --partition=sixhour
 #SBATCH --time=05:50:00
 #SBATCH --gres=gpu:q6000:1
-#SBATCH --mem=62G
+#SBATCH --mem=128G
 #SBATCH --cpus-per-task=2
 #SBATCH --output=/home/a474r867/scratch/nem_q6k_v20_%j.out
 #SBATCH --error=/home/a474r867/scratch/nem_q6k_v20_%j.err
+#SBATCH --exclude=r22r05n01
 #SBATCH --signal=B:SIGUSR1@120
 
 # --- Environment: BLOCK ALL HuggingFace network calls ---
