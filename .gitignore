@@ -24,3 +24,4 @@ wandb/
 *.sif
 build-error.log
 build-loop.sh
+outputs/

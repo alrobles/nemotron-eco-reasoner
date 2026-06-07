@@ -157,7 +157,7 @@ from trl import SFTTrainer, SFTConfig
 trainer = SFTTrainer(
     model=model,
     args=SFTConfig(
-        output_dir=OUT_PATH, max_steps=global_step+MAX_STEPS, per_device_train_batch_size=1,
+        output_dir=OUT_PATH, max_steps=MAX_STEPS, per_device_train_batch_size=1,
         gradient_accumulation_steps=GRAD_ACCUM, learning_rate=LEARNING_RATE, max_seq_length=MAX_SEQ_LEN,
         warmup_steps=50, logging_steps=10, save_steps=SAVE_STEPS, save_total_limit=3,
         bf16=not USE_FP16, fp16=USE_FP16,
@@ -170,28 +170,20 @@ _trainer = trainer  # expose for SIGUSR1 handler
 
 print("TRAINING with Unsloth 4-bit QLoRA...")
 
-# Checkpoint resume logic — load adapter via PeftModel, skip .pt files (torch 2.5.1 compat)
+# Checkpoint resume logic
 resume_from = None
-global_step = 0
-if RESUME_CHECKPOINT == "True" or RESUME_CHECKPOINT == "true" or RESUME_CHECKPOINT:
-    import glob as _glob
-    ckpts = sorted(_glob.glob(os.path.join(OUT_PATH, "checkpoint-*")), key=os.path.getmtime)
-    # Only use checkpoints that have adapter_model.safetensors
-    valid_ckpts = [c for c in ckpts if os.path.exists(os.path.join(c, "adapter_model.safetensors"))]
-    if valid_ckpts:
-        latest = valid_ckpts[-1]
-        from peft import PeftModel
-        model = PeftModel.from_pretrained(model, latest, is_trainable=True)
-        # Try to read global step
-        state_file = os.path.join(latest, "trainer_state.json")
-        if os.path.exists(state_file):
-            try:
-                state = json.load(open(state_file))
-                global_step = state.get("global_step", 0)
-            except: pass
-        print(f"  Adapter loaded from: {latest} (global step: {global_step})")
+if RESUME_CHECKPOINT == "True" or RESUME_CHECKPOINT == "true":
+    # Auto-find latest checkpoint
+    import glob
+    ckpts = sorted(glob.glob(os.path.join(OUT_PATH, "checkpoint-*")), key=os.path.getmtime)
+    if ckpts:
+        resume_from = ckpts[-1]
+        print(f"  Auto-resuming from: {resume_from}")
     else:
-        print("  No valid checkpoint found, training from scratch")
+        print("  No checkpoint found, training from scratch")
+elif RESUME_CHECKPOINT:
+    resume_from = RESUME_CHECKPOINT
+    print(f"  Resuming from: {resume_from}")
 
 try:
     trainer.train(resume_from_checkpoint=resume_from)
