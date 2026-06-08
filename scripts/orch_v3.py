@@ -17,7 +17,9 @@ from datetime import datetime
 from collections import defaultdict
 
 SCRATCH = os.path.expanduser("~/scratch")
-REPO = os.path.join(SCRATCH, "nemotron-eco-reasoner")
+# Cluster-side scratch path (different from local on reumanlab)
+CLUSTER_SCRATCH = "/home/a474r867/scratch"
+REPO = os.path.join(CLUSTER_SCRATCH, "nemotron-eco-reasoner")
 LOG = os.path.join(SCRATCH, "orch_v3.log")
 STATE_FILE = os.path.join(SCRATCH, "gpu_state.json")
 TEMPLATE = os.path.join(REPO, "hpc/nem_unified.slurm")
@@ -52,10 +54,21 @@ def log(msg):
     with open(LOG, "a") as f:
         f.write(line + "\n")
 
+SSH_CMD = "ssh -i ~/.ssh/hpc_a474r867_ed25519_new -o BatchMode=yes -o ConnectTimeout=10 a474r867@hpc.crc.ku.edu"
+
 def run(cmd, timeout=15):
+    """Run command on cluster via SSH, stripping the login banner."""
     try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        return r.stdout.strip()
+        wrapped = f'{SSH_CMD} "{cmd}"'
+        r = subprocess.run(wrapped, shell=True, capture_output=True, text=True, timeout=timeout)
+        out = r.stdout.strip()
+        # Strip login banner (everything before and including the last dashed line)
+        if "Access to electronic resources" in out:
+            # Find the last occurrence of "log out now." and take everything after
+            idx = out.rfind("log out now.\n")
+            if idx >= 0:
+                out = out[idx + len("log out now.\n"):].strip()
+        return out
     except Exception:
         return ""
 
@@ -141,7 +154,7 @@ def get_our_jobs():
 def detect_oom():
     """Check recent logs for OOM kills, apply backoff."""
     out = run("grep -rl 'Killed\\|CUDA out of memory\\|OutOfMemoryError' "
-              f"{SCRATCH}/nem_unified_*.err {SCRATCH}/nem_unified_*.out 2>/dev/null")
+              f"{CLUSTER_SCRATCH}/nem_unified_*.err {CLUSTER_SCRATCH}/nem_unified_*.out 2>/dev/null")
     now = time.time()
     new_oom = []
     for f in out.split("\n"):
@@ -172,8 +185,11 @@ def submit_targeted(node, gtype, mem_gb, dry_run=False):
     sif_path = SIF[sif_key]
 
     if not os.path.exists(sif_path):
-        log(f"SKIP {node}: SIF {sif_path} not found")
-        return False
+        # Check on cluster via SSH
+        cluster_check = run(f"test -f {sif_path} && echo YES")
+        if "YES" not in cluster_check:
+            log(f"SKIP {node}: SIF {sif_path} not found")
+            return False
 
     # Check OOM backoff
     now = time.time()
@@ -278,8 +294,8 @@ def main():
             save_state(nodes, jobs)
 
             # Cleanup old logs (>8h, more generous than v2's 6h)
-            run(f"find {SCRATCH}/ -name 'nem_unified_*.out' -mmin +480 -delete 2>/dev/null")
-            run(f"find {SCRATCH}/ -name 'nem_unified_*.err' -mmin +480 -delete 2>/dev/null")
+            run(f"find {CLUSTER_SCRATCH}/ -name 'nem_unified_*.out' -mmin +480 -delete 2>/dev/null")
+            run(f"find {CLUSTER_SCRATCH}/ -name 'nem_unified_*.err' -mmin +480 -delete 2>/dev/null")
 
             if args.once:
                 break
