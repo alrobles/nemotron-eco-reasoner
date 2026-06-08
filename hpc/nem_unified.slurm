@@ -77,13 +77,13 @@ cc=(torch.cuda.get_device_capability(0)[0]*10+torch.cuda.get_device_capability(0
 # AUTO-CONFIG per GPU type
 gpu_lower=gpu_name.lower()
 if vram_gb>=90:
-    SEQ_LEN,RANK=2048,32;  TAG="BEAST"
+    SEQ_LEN,RANK,GRAD_ACCUM=2048,32,8;  TAG="BEAST"
+elif vram_gb>=55:
+    SEQ_LEN,RANK,GRAD_ACCUM=1024,16,8;  TAG="HEAVY"
 elif vram_gb>=40:
-    SEQ_LEN,RANK=1024,16;  TAG="HEAVY"
-elif vram_gb>=30:
-    SEQ_LEN,RANK=256,8;    TAG="MEDIUM"
+    SEQ_LEN,RANK,GRAD_ACCUM=512,8,8;    TAG="MEDIUM"
 else:
-    SEQ_LEN,RANK=256,4;    TAG="LIGHT"
+    SEQ_LEN,RANK,GRAD_ACCUM=128,4,4;    TAG="LIGHT"
 
 print(f"GPU: {gpu_name} ({vram_gb:.1f}GB) CC={cc} bf16={bf16_ok} | seq={SEQ_LEN} rank={RANK} [{TAG}]")
 
@@ -158,7 +158,7 @@ target_total=global_step+STEPS_PER_JOB
 USE_BF16=bf16_ok
 trainer=SFTTrainer(model=model,args=SFTConfig(
     output_dir=OUT_PATH,max_steps=target_total,per_device_train_batch_size=1,
-    gradient_accumulation_steps=8,learning_rate=1e-4,max_seq_length=SEQ_LEN,
+    gradient_accumulation_steps=GRAD_ACCUM,learning_rate=1e-4,max_seq_length=SEQ_LEN,
     warmup_steps=30,lr_scheduler_type="constant_with_warmup",
     logging_steps=10,save_steps=50,save_total_limit=5,
     bf16=USE_BF16,fp16=not USE_BF16,
