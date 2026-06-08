@@ -81,7 +81,7 @@ def scan_nodes():
         if len(parts) < 4:
             continue
         name, state, mem_mb, gres = parts[0], parts[1], parts[2], parts[3]
-        if state not in ("idle", "mixed"):
+        if state not in ("idle", "mixed") and not state.startswith("mixed"):
             continue
 
         # Parse GPU type and slot count
@@ -198,7 +198,7 @@ def submit_targeted(node, gtype, mem_gb, dry_run=False):
         log(f"SKIP {node}: OOM backoff ({remaining}s left)")
         return False
 
-    mem = min(mem_gb, 120)  # cap at 120G
+    mem = min(mem_gb, 72)  # cap at 72G (120G was too aggressive — only dead Blackwell could satisfy)
     mem = max(mem, spec["min_mem"])
 
     cmd = (f"sbatch --job-name=nem --nodelist={node} --mem={mem}G "
@@ -266,7 +266,7 @@ def main():
                         break
                     gtype = info["gtype"]
                     free = info["free_gpus"]
-                    mem_per = min(int(info["free_mem"] / max(free, 1)), 120)
+                    mem_per = min(int(info["free_mem"] / max(free, 1)), 72)
 
                     for _ in range(free):
                         if submitted >= shortfall:
