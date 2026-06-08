@@ -20,7 +20,7 @@ export PYTHONUNBUFFERED=1
 
 C=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-cuda.sif
 M=/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848
-D=/home/a474r867/scratch/nemotron-eco-reasoner/data/train_final_v2.jsonl
+D=/home/a474r867/scratch/nemotron-eco-reasoner/data/train_cot_unified.jsonl
 O=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/unified
 P=/tmp/pip_$SLURM_JOB_ID
 rm -rf $P 2>/dev/null; mkdir -p $O $P
