@@ -1,0 +1,74 @@
+Bootstrap: docker
+From: nvcr.io/nvidia/pytorch:25.01-py3
+
+%labels
+    Author a474r867@ku.edu
+    Description Nemotron-3-Nano-30B training with Blackwell sm_120 + mamba-ssm
+    Version 4.0-blackwell-mamba
+
+%environment
+    export TORCH_COMPILE_DISABLE=1
+    export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    export OMP_NUM_THREADS=1
+    export TOKENIZERS_PARALLELISM=false
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+
+%post
+    apt-get update -qq && apt-get install -y -qq git wget curl build-essential ninja-build 2>/dev/null
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+    python3 -c "import torch; print(f'PyTorch {torch.__version__} CUDA {torch.version.cuda}'); archs = torch.cuda.get_arch_list(); print(f'Archs: {archs}')"
+
+    # Core ML stack
+    pip install --no-cache-dir -q \
+        "transformers==4.57.6" "tokenizers==0.22.2" "datasets==4.3.0" \
+        "trl==0.12.0" "peft>=0.15.0" "bitsandbytes>=0.45.0" \
+        "accelerate>=1.0.0" "safetensors>=0.5.0" \
+        "sentencepiece" "protobuf" "rich"
+
+    pip install --no-cache-dir -q unsloth unsloth_zoo
+
+    # === mamba-ssm + causal-conv1d from source with sm_120 patch ===
+    # Ref: https://github.com/state-spaces/mamba/issues/745
+    export TORCH_CUDA_ARCH_LIST="9.0;12.0"
+    export FORCE_CUDA=1
+    export MAX_JOBS=4
+
+    # causal-conv1d
+    cd /tmp && git clone https://github.com/Dao-AILab/causal-conv1d.git && cd causal-conv1d
+    python3 -c "
+f = open('setup.py', 'r'); t = f.read(); f.close()
+old = 'cc_flag.append(\"arch=compute_90,code=sm_90\")'
+new = old + '\n    cc_flag.append(\"-gencode\")\n    cc_flag.append(\"arch=compute_120,code=sm_120\")'
+t2 = t.replace(old, new)
+f = open('setup.py', 'w'); f.write(t2); f.close()
+print('causal-conv1d setup.py patched for sm_120')
+"
+    pip install . --no-build-isolation
+    python3 -c "import causal_conv1d; print(f'causal_conv1d {causal_conv1d.__version__} OK')"
+
+    # mamba-ssm
+    cd /tmp && git clone https://github.com/state-spaces/mamba.git && cd mamba
+    python3 -c "
+f = open('setup.py', 'r'); t = f.read(); f.close()
+old = 'cc_flag.append(\"arch=compute_90,code=sm_90\")'
+new = old + '\n    cc_flag.append(\"-gencode\")\n    cc_flag.append(\"arch=compute_120,code=sm_120\")'
+t2 = t.replace(old, new)
+f = open('setup.py', 'w'); f.write(t2); f.close()
+print('mamba-ssm setup.py patched for sm_120')
+"
+    pip install . --no-build-isolation
+    python3 -c "import mamba_ssm; print(f'mamba_ssm {mamba_ssm.__version__} OK')"
+
+    rm -rf /tmp/causal-conv1d /tmp/mamba
+
+    python3 -c "
+import torch, transformers, trl, peft, mamba_ssm, causal_conv1d
+print(f'PyTorch {torch.__version__} CUDA {torch.version.cuda}')
+print(f'mamba_ssm={mamba_ssm.__version__} causal_conv1d={causal_conv1d.__version__}')
+print('=== ALL IMPORTS OK ===')
+"
+
+%runscript
+    exec python3 "$@"
