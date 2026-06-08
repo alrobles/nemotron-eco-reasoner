@@ -187,7 +187,7 @@ trainer.save_model(ckpt_dir)
 tok.save_pretrained(ckpt_dir)
 
 elapsed=(time.time()-t0)/60
-final_loss=trainer.state.log_history[-1].get("loss","?") if trainer.state.log_history else "?"
+final_loss=trainer.state.log_history[-1].get('loss') or trainer.state.log_history[-1].get('train_loss','?') if trainer.state.log_history else '?'
 
 print(f"DONE {elapsed:.1f}min steps={global_step}->{target_total} loss={final_loss}")
 
