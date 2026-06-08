@@ -17,6 +17,7 @@ export OMP_NUM_THREADS=1
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export PYTHONUNBUFFERED=1
+export TRITON_CACHE_DIR=/tmp/triton_$SLURM_JOB_ID
 
 # SIF: use CONTAINER_SIF from orchestrator, or default to cuda
 C=${CONTAINER_SIF:-/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-cuda.sif}
@@ -38,7 +39,7 @@ if command -v rocminfo &>/dev/null 2>&1 || [[ "$C" == *mi210* ]]; then
     GPU_FLAG="--rocm"
 fi
 
-apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" --env PYTHONUSERBASE=$P $C bash << 'INSTALL_EOF'
+apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" --env PYTHONUSERBASE=$P --env TRITON_CACHE_DIR=/tmp/triton_$SLURM_JOB_ID $C bash << 'INSTALL_EOF'
 set -uo pipefail
 # Core deps (must succeed)
 pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1 || true
@@ -70,7 +71,7 @@ apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" \
     --env TORCH_COMPILE_DISABLE=1 --env OMP_NUM_THREADS=1 \
     --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
     --env MODEL_PATH=$M --env DATA_PATH=$D --env OUT_PATH=$O \
-    --env JOBID=$JOBID \
+    --env JOBID=$JOBID --env TRITON_CACHE_DIR=/tmp/triton_$SLURM_JOB_ID \
     $C env PYTHONUNBUFFERED=1 python3 -u << 'PYEOF'
 import os, sys, signal, types, torch, time, json, glob
 from datasets import load_dataset
