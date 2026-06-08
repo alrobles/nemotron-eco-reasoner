@@ -50,12 +50,18 @@ print("=== Phase 1 PASSED ===")
 '
 if [ $? -ne 0 ]; then echo "PHASE 1 FAILED — PyTorch/CUDA check failed"; exit 1; fi
 
-echo "=== Phase 1.5: Install mamba-ssm (needs GPU for compilation) ==="
+echo "=== Phase 1.5: Install mamba-ssm with sm_120 support ==="
 apptainer exec --nv --bind "/dev/shm,/tmp,$P" \
     --env PYTHONUNBUFFERED=1 --env TORCH_COMPILE_DISABLE=1 \
+    --env TORCH_CUDA_ARCH_LIST="9.0;12.0" \
+    --env FORCE_CUDA=1 \
     $C bash -c '
-pip install --no-build-isolation "mamba_ssm>=2.2.5" "causal_conv1d>=1.5.2" 2>&1 | tail -5
+echo "Building causal_conv1d with TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
+pip install --no-build-isolation "causal_conv1d>=1.5.2" 2>&1 | tail -5
+echo "Building mamba_ssm with TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
+pip install --no-build-isolation "mamba_ssm>=2.2.5" 2>&1 | tail -5
 python3 -c "import mamba_ssm; print(f\"mamba_ssm {mamba_ssm.__version__} OK\")"
+python3 -c "import causal_conv1d; print(f\"causal_conv1d {causal_conv1d.__version__} OK\")"
 '
 if [ $? -ne 0 ]; then echo "WARNING: mamba-ssm install failed, will try without"; fi
 
