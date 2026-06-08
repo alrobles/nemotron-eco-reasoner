@@ -2,7 +2,7 @@
 # Blackwell Pro6000 test — 5 min quick test with PyTorch 2.6 upgrade
 #SBATCH --job-name=nem-bw-test
 #SBATCH --partition=sixhour
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=4
@@ -36,14 +36,22 @@ set -euo pipefail
 echo "--- Step 1: Current PyTorch version ---"
 python3 -c 'import torch; print(f"PyTorch {torch.__version__} CUDA {torch.version.cuda}")'
 
-echo "--- Step 2: Create isolated venv with PyTorch 2.6+ for Blackwell ---"
-python3 -m venv --system-site-packages $P/venv
+echo "--- Step 2: Create CLEAN venv (no system packages) with PyTorch 2.6+ ---"
+python3 -m venv $P/venv
 source $P/venv/bin/activate
+pip install --upgrade pip 2>&1 | tail -1
 
-# Install PyTorch 2.6+ with CUDA 12.8 (has sm_120 Blackwell kernels)
+# Try multiple PyTorch sources in order of preference
+echo "--- Trying PyTorch 2.6+ with CUDA 12.6 (sm_120 Blackwell support) ---"
 pip install --no-cache-dir \
+    "torch>=2.6.0" torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -5 || \
+pip install --no-cache-dir \
+    "torch>=2.6.0" torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu124 2>&1 | tail -5 || \
+pip install --no-cache-dir --pre \
     torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu128 2>&1 | tail -5
+    --index-url https://download.pytorch.org/whl/nightly/cu126 2>&1 | tail -5
 
 echo "--- Step 3: Verify new PyTorch ---"
 python3 -c '
@@ -52,6 +60,7 @@ print(f"PyTorch {torch.__version__} CUDA {torch.version.cuda}")
 print(f"GPU: {torch.cuda.get_device_name(0)}")
 cc = torch.cuda.get_device_capability(0)
 print(f"Compute Capability: {cc[0]}.{cc[1]}")
+print(f"Supported archs: {torch.cuda.get_arch_list()}")
 x = torch.randn(100, 100, device="cuda")
 y = torch.matmul(x, x.T)
 print(f"CUDA matmul test: OK ({y.shape})")
@@ -62,6 +71,7 @@ echo "--- Step 4: Install training deps in venv ---"
 pip install --no-cache-dir -q "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1
 pip install --no-cache-dir -q "datasets==4.3.0" bitsandbytes 2>&1 | tail -1
 pip install --no-cache-dir -q unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1
+pip install --no-cache-dir -q accelerate safetensors sentencepiece protobuf peft 2>&1 | tail -1
 python3 -c 'import transformers, trl; print(f"tf:{transformers.__version__} trl:{trl.__version__}")'
 python3 -c 'import unsloth; from trl import SFTTrainer; print("Unsloth + SFTTrainer: OK")'
 INSTALL_EOF
