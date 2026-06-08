@@ -31,14 +31,14 @@ SIF = {
 
 # GPU specs: vram, bf16, arch, recommended seq/rank, min RAM for job
 GPU_SPECS = {
-    "pro6000": {"vram": 96, "bf16": True,  "arch": "blackwell", "seq": 2048, "rank": 32, "min_mem": 64, "sif": "blackwell"},
-    "a100":    {"vram": 40, "bf16": True,  "arch": "ampere",    "seq": 1024, "rank": 16, "min_mem": 64, "sif": "cuda"},
+    "pro6000": {"vram": 48, "bf16": True,  "arch": "blackwell", "seq": 2048, "rank": 32, "min_mem": 64, "sif": "blackwell"},
+    "a100":    {"vram": 80, "bf16": True,  "arch": "ampere",    "seq": 2048, "rank": 64, "min_mem": 64, "sif": "cuda"},
     "a40":     {"vram": 48, "bf16": True,  "arch": "ampere",    "seq": 1024, "rank": 16, "min_mem": 64, "sif": "cuda"},
     "l40":     {"vram": 48, "bf16": True,  "arch": "ada",       "seq": 1024, "rank": 16, "min_mem": 64, "sif": "cuda"},
     "q8000":   {"vram": 48, "bf16": False, "arch": "turing",    "seq": 512,  "rank": 8,  "min_mem": 48, "sif": "cuda"},
     "q6000":   {"vram": 24, "bf16": False, "arch": "turing",    "seq": 128,  "rank": 4,  "min_mem": 48, "sif": "cuda"},
     "v100":    {"vram": 32, "bf16": False, "arch": "volta",     "seq": 128,  "rank": 4,  "min_mem": 48, "sif": "cuda"},
-    "mi210":   {"vram": 68, "bf16": True,  "arch": "cdna2",     "seq": 1024, "rank": 16, "min_mem": 64, "sif": "mi210"},
+    "mi210":   {"vram": 68, "bf16": True,  "arch": "cdna2",     "seq": 2048, "rank": 32, "min_mem": 64, "sif": "mi210"},
 }
 
 # Track OOM per node
