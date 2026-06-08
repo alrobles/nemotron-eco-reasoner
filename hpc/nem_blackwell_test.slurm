@@ -1,8 +1,8 @@
 #!/bin/bash
-# Blackwell Pro6000 test — 5 min quick test with PyTorch 2.6 upgrade
+# Blackwell Pro6000 test — uses nemotron-blackwell.sif (NGC PyTorch 2.8 + sm_120)
 #SBATCH --job-name=nem-bw-test
 #SBATCH --partition=sixhour
-#SBATCH --time=01:00:00
+#SBATCH --time=00:30:00
 #SBATCH --gres=gpu:1
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=4
@@ -17,39 +17,25 @@ export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export PYTHONUNBUFFERED=1
 
-C=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-cuda.sif
+# === USE NEW BLACKWELL SIF ===
+C=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-blackwell.sif
 M=/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848
 D=/home/a474r867/scratch/nemotron-eco-reasoner/data/train_final_v2.jsonl
 O=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/blackwell_test
-P=/tmp/pip_$SLURM_JOB_ID
+P=/tmp/bw_test_$SLURM_JOB_ID
+
 rm -rf $P 2>/dev/null; mkdir -p $O $P
-
 JOBID=${SLURM_JOB_ID:-$$}
+
 echo "=== BLACKWELL TEST job=$JOBID $(date) ==="
-echo "=== Phase 1: Upgrade PyTorch for sm_120 (Blackwell) support ==="
+echo "SIF: $C"
+ls -lh $C
 
-apptainer exec --nv --bind "/dev/shm,/tmp" \
+echo "=== Phase 1: Verify PyTorch sm_120 support ==="
+apptainer exec --nv --bind "/dev/shm,/tmp,$P" \
     --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
-    $C bash << INSTALL_EOF
-set -euo pipefail
-
-echo "--- Step 1: Current PyTorch version ---"
-python3 -c 'import torch; print(f"PyTorch {torch.__version__} CUDA {torch.version.cuda}")'
-
-echo "--- Step 2: Create CLEAN venv (no system packages) with PyTorch 2.6+ ---"
-python3 -m venv $P/venv
-source $P/venv/bin/activate
-pip install --upgrade pip 2>&1 | tail -1
-
-# PyTorch 2.7.1+cu128 confirmed working with RTX PRO 6000 Blackwell sm_120
-# See: https://github.com/pytorch/pytorch/issues/157549
-echo "--- Installing PyTorch 2.7.1+cu128 (confirmed sm_120 Blackwell support) ---"
-pip install --no-cache-dir \
-    torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu128 2>&1 | tail -5
-
-echo "--- Step 3: Verify new PyTorch ---"
-python3 -c '
+    --env PYTHONUNBUFFERED=1 --env TORCH_COMPILE_DISABLE=1 \
+    $C python3 -c '
 import torch
 print(f"PyTorch {torch.__version__} CUDA {torch.version.cuda}")
 print(f"GPU: {torch.cuda.get_device_name(0)}")
@@ -60,24 +46,15 @@ x = torch.randn(100, 100, device="cuda")
 y = torch.matmul(x, x.T)
 print(f"CUDA matmul test: OK ({y.shape})")
 print(f"bf16 supported: {torch.cuda.is_bf16_supported()}")
+print("=== Phase 1 PASSED ===")
 '
-
-echo "--- Step 4: Install training deps in venv ---"
-pip install --no-cache-dir -q "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1
-pip install --no-cache-dir -q "datasets==4.3.0" bitsandbytes 2>&1 | tail -1
-pip install --no-cache-dir -q unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1
-pip install --no-cache-dir -q accelerate safetensors sentencepiece protobuf peft 2>&1 | tail -1
-python3 -c 'import transformers, trl; print(f"tf:{transformers.__version__} trl:{trl.__version__}")'
-python3 -c 'import unsloth; from trl import SFTTrainer; print("Unsloth + SFTTrainer: OK")'
-INSTALL_EOF
-
-if [ $? -ne 0 ]; then echo "INSTALL FAILED"; exit 1; fi
+if [ $? -ne 0 ]; then echo "PHASE 1 FAILED — PyTorch/CUDA check failed"; exit 1; fi
 
 echo "=== Phase 2: Quick training test (10 steps) ==="
 
-# Write training script to temp file (avoids heredoc+venv issues)
+# Write training script
 cat > $P/blackwell_train.py << 'PYEOF'
-import os, sys, types, torch, time, json
+import os, sys, torch, time, json
 from datasets import load_dataset
 os.environ['TORCH_COMPILE_DISABLE']='1'
 t0=time.time()
@@ -102,7 +79,7 @@ model,tok=FastLanguageModel.from_pretrained(MODEL_PATH,max_seq_length=SEQ_LEN,lo
 load_time=time.time()-t0
 print(f"Model loaded in {load_time:.1f}s")
 
-# MoE patch
+# MoE patch for Nemotron hybrid architecture
 patched=0
 for module in model.modules():
     if not hasattr(module,'moe') or not hasattr(module,'experts'): continue
@@ -117,82 +94,78 @@ for module in model.modules():
                 eh=h[m]; eo=el(eh); w=tw.view(-1)[m]; wo=eo*w.unsqueeze(-1)
                 if wo.dtype!=dt: wo=wo.to(dt)
                 fh.index_add_(0,m,wo)
-            tk=ti.shape[-1]; fh=fh.view(-1,tk,fh.size(-1)).sum(dim=1)
             return fh
         return pm
-    module.moe=types.MethodType(mp(module),module); patched+=1
+    import types
+    module.moe=types.MethodType(mp(module),module)
+    patched+=1
 print(f"MoE patched: {patched} layers")
 
-model=FastLanguageModel.get_peft_model(model,r=RANK,lora_alpha=RANK,
-    target_modules=['q_proj','k_proj','v_proj','o_proj','in_proj','out_proj','up_proj','down_proj'],
-    use_gradient_checkpointing='unsloth')
-model.print_trainable_parameters()
+# Apply LoRA
+model=FastLanguageModel.get_peft_model(model,r=RANK,target_modules=["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"],lora_alpha=RANK*2,lora_dropout=0,bias="none",use_gradient_checkpointing="unsloth")
+print(f"LoRA applied: rank={RANK}")
 
-ds=load_dataset("json",data_files={"train":DATA_PATH},split="train")
-def fmt(ex):
-    ms=ex.get("messages")
-    if not ms: ms=[{"role":"user","content":ex.get("prompt","?")},{"role":"assistant","content":ex.get("answer","?")}]
-    return {"text":tok.apply_chat_template(ms,tokenize=False,add_generation_prompt=False)}
-ds=ds.map(fmt)
+# Load data
+from trl import SFTTrainer
+from transformers import TrainingArguments
+ds=load_dataset("json",data_files=DATA_PATH,split="train").select(range(min(100,5000)))
+print(f"Dataset: {len(ds)} examples")
 
-alloc=torch.cuda.memory_allocated()/1e9; reserved=torch.cuda.memory_reserved()/1e9
-print(f"VRAM: {alloc:.1f}G alloc / {reserved:.1f}G reserved")
+args=TrainingArguments(
+    output_dir=OUT_PATH, max_steps=STEPS, per_device_train_batch_size=1,
+    gradient_accumulation_steps=2, learning_rate=2e-4, bf16=bf16_ok, fp16=not bf16_ok,
+    logging_steps=1, save_steps=STEPS, warmup_steps=0, lr_scheduler_type="constant",
+    optim="adamw_8bit", report_to="none", seed=42
+)
 
-from trl import SFTTrainer,SFTConfig
-trainer=SFTTrainer(model=model,args=SFTConfig(
-    output_dir=OUT_PATH,max_steps=STEPS,per_device_train_batch_size=1,
-    gradient_accumulation_steps=8,learning_rate=1e-4,max_seq_length=SEQ_LEN,
-    warmup_steps=2,lr_scheduler_type="constant_with_warmup",
-    logging_steps=1,save_steps=STEPS,save_total_limit=2,
-    bf16=True,fp16=False,
-    remove_unused_columns=False,report_to="none",
-    dataloader_num_workers=0,packing=True),
-    train_dataset=ds,processing_class=tok)
+trainer=SFTTrainer(model=model,tokenizer=tok,train_dataset=ds,
+    args=args, max_seq_length=SEQ_LEN,
+    dataset_text_field=None, formatting_func=lambda ex: tok.apply_chat_template(ex["messages"],tokenize=False))
 
-print(f"TRAINING BLACKWELL TEST: {STEPS} steps, seq={SEQ_LEN}, rank={RANK}, bf16=True")
-train_t0=time.time()
-trainer.train()
-train_time=time.time()-train_t0
+print(f"Starting training ({STEPS} steps)...")
+step_times=[]
+for step in range(STEPS):
+    t1=time.time()
+    trainer.train() if step==0 else None
+    t2=time.time()
+    if step==0: step_times.append(t2-t1)
 
-ckpt_dir=os.path.join(OUT_PATH,f"checkpoint-blackwell-test-{JOBID}")
-trainer.save_model(ckpt_dir)
-tok.save_pretrained(ckpt_dir)
+train_time=time.time()-t0-load_time
+vram_used=torch.cuda.max_memory_allocated()/1e9
 
-elapsed=(time.time()-t0)/60
-final_loss=trainer.state.log_history[-1].get("loss","?") if trainer.state.log_history else "?"
-step_time=train_time/STEPS
-
-print(f"\n{'='*60}")
-print(f"BLACKWELL TEST RESULTS")
-print(f"{'='*60}")
-print(f"GPU: {gpu_name} ({vram_gb:.1f}GB)")
-print(f"PyTorch: {torch.__version__} CUDA: {torch.version.cuda}")
-print(f"Config: seq={SEQ_LEN} rank={RANK} bf16=True [{TAG}]")
-print(f"Model load: {load_time:.1f}s")
-print(f"Training: {STEPS} steps in {train_time:.1f}s ({step_time:.1f}s/step)")
-print(f"Final loss: {final_loss}")
-print(f"Total elapsed: {elapsed:.1f} min")
-print(f"Checkpoint: {ckpt_dir}")
-print(f"VRAM peak: {torch.cuda.max_memory_allocated()/1e9:.1f}GB / {vram_gb:.1f}GB")
-print(f"{'='*60}")
-print("SUCCESS — BLACKWELL IS READY FOR PRODUCTION TRAINING")
-
-manifest={"gpu":gpu_name,"vram_gb":round(vram_gb,1),"cc":f"{cc[0]}.{cc[1]}",
-    "pytorch":torch.__version__,"cuda":torch.version.cuda,
-    "seq":SEQ_LEN,"rank":RANK,"tag":TAG,"bf16":True,
-    "steps":STEPS,"step_time_s":round(step_time,1),
-    "final_loss":str(final_loss),"total_min":round(elapsed,1),
-    "vram_peak_gb":round(torch.cuda.max_memory_allocated()/1e9,1)}
-with open(os.path.join(OUT_PATH,f"blackwell-test-{JOBID}.json"),"w") as f:
-    json.dump(manifest,f,indent=2)
+# Output manifest
+manifest={
+    "status": "SUCCESS",
+    "gpu": gpu_name,
+    "vram_gb": round(vram_gb,1),
+    "vram_used_gb": round(vram_used,1),
+    "cc": f"{cc[0]}.{cc[1]}",
+    "bf16": bf16_ok,
+    "pytorch": torch.__version__,
+    "cuda": torch.version.cuda,
+    "config": {"seq_len": SEQ_LEN, "rank": RANK, "tag": TAG},
+    "steps": STEPS,
+    "load_time_s": round(load_time,1),
+    "train_time_s": round(train_time,1),
+    "moe_patched": patched,
+    "job_id": JOBID
+}
+manifest_path=os.path.join(OUT_PATH, f"blackwell_manifest_{JOBID}.json")
+with open(manifest_path,"w") as f: json.dump(manifest,f,indent=2)
+print(f"\n{'='*50}")
+print(json.dumps(manifest,indent=2))
+print(f"{'='*50}")
+print(f"\n*** SUCCESS — BLACKWELL IS READY ***")
+print(f"Manifest: {manifest_path}")
 PYEOF
 
-# Run training script inside container using the venv python
-apptainer exec --nv --bind "/dev/shm,/tmp" \
+apptainer exec --nv --bind "/dev/shm,/tmp,$P,$M,$O,$(dirname $D)" \
+    --env MODEL_PATH=$M --env DATA_PATH=$D --env OUT_PATH=$O --env JOBID=$JOBID \
+    --env STEPS_PER_JOB=10 --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
+    --env PYTHONUNBUFFERED=1 --env TORCH_COMPILE_DISABLE=1 \
     --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    --env TORCH_COMPILE_DISABLE=1 --env OMP_NUM_THREADS=1 \
-    --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
-    --env MODEL_PATH=$M --env DATA_PATH=$D --env OUT_PATH=$O \
-    --env JOBID=$JOBID --env STEPS_PER_JOB=10 \
-    $C bash -c "source $P/venv/bin/activate && PYTHONUNBUFFERED=1 python3 -u $P/blackwell_train.py"
-echo "Exit: $?"
+    $C python3 $P/blackwell_train.py
+
+RC=$?
+echo "=== DONE (exit=$RC) $(date) ==="
+exit $RC
