@@ -51,7 +51,7 @@ GPU_CHECK=$(python3 -c 'import torch; n=torch.cuda.get_device_name(0); print(n)'
 echo "GPU: $GPU_CHECK"
 if echo "$GPU_CHECK" | grep -qi "PRO 6000\|blackwell"; then
     echo "=== Blackwell: installing pre-built mamba wheels (2s) ==="
-    pip install --user --no-deps $WHEEL_DIR/causal_conv1d-1.5.3.post1-cp312-cp312-linux_x86_64.whl 2>&1 | tail -1
+    pip install --user --no-deps $WHEEL_DIR/causal_conv1d-1.4.0-cp312-cp312-linux_x86_64.whl 2>&1 | tail -1
     pip install --user --no-deps $WHEEL_DIR/mamba_ssm-2.2.4-cp312-cp312-linux_x86_64.whl 2>&1 | tail -1
 else
     echo "=== Non-Blackwell: trying pip wheels ==="
