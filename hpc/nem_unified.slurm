@@ -18,7 +18,8 @@ export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export PYTHONUNBUFFERED=1
 
-C=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-cuda.sif
+# SIF: use CONTAINER_SIF from orchestrator, or default to cuda
+C=${CONTAINER_SIF:-/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-cuda.sif}
 M=/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848
 D=/home/a474r867/scratch/nemotron-eco-reasoner/data/train_cot_unified.jsonl
 O=/home/a474r867/scratch/nemotron-eco-reasoner/outputs/unified
@@ -29,8 +30,15 @@ JOBID=${SLURM_JOB_ID:-$$}
 START_TS=$(date +%s)
 
 echo "=== UNIFIED job=$JOBID $(date) ==="
+echo "SIF: $C"
 
-apptainer exec --nv --bind "/dev/shm,/tmp" --env PYTHONUSERBASE=$P $C bash << 'INSTALL_EOF'
+# Auto-detect GPU runtime: ROCm for MI210, NVIDIA for everything else
+GPU_FLAG="--nv"
+if command -v rocminfo &>/dev/null 2>&1 || [[ "$C" == *mi210* ]]; then
+    GPU_FLAG="--rocm"
+fi
+
+apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" --env PYTHONUSERBASE=$P $C bash << 'INSTALL_EOF'
 set -euo pipefail
 pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1
 pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1
@@ -43,7 +51,7 @@ INSTALL_EOF
 if [ $? -ne 0 ]; then echo "INSTALL FAILED"; exit 1; fi
 
 echo "=== Training ==="
-apptainer exec --nv --bind "/dev/shm,/tmp" \
+apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" \
     --env PYTHONUSERBASE=$P --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env TORCH_COMPILE_DISABLE=1 --env OMP_NUM_THREADS=1 \
     --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
