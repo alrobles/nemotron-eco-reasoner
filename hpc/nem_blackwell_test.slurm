@@ -50,6 +50,15 @@ print("=== Phase 1 PASSED ===")
 '
 if [ $? -ne 0 ]; then echo "PHASE 1 FAILED — PyTorch/CUDA check failed"; exit 1; fi
 
+echo "=== Phase 1.5: Install mamba-ssm (needs GPU for compilation) ==="
+apptainer exec --nv --bind "/dev/shm,/tmp,$P" \
+    --env PYTHONUNBUFFERED=1 --env TORCH_COMPILE_DISABLE=1 \
+    $C bash -c '
+pip install --no-build-isolation "mamba_ssm>=2.2.5" "causal_conv1d>=1.5.2" 2>&1 | tail -5
+python3 -c "import mamba_ssm; print(f\"mamba_ssm {mamba_ssm.__version__} OK\")"
+'
+if [ $? -ne 0 ]; then echo "WARNING: mamba-ssm install failed, will try without"; fi
+
 echo "=== Phase 2: Quick training test (10 steps) ==="
 
 # Write training script
