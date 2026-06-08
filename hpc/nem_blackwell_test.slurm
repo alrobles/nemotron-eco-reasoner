@@ -2,7 +2,7 @@
 # Blackwell Pro6000 test — uses nemotron-blackwell.sif (NGC PyTorch 2.8 + sm_120)
 #SBATCH --job-name=nem-bw-test
 #SBATCH --partition=sixhour
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=4
@@ -50,20 +50,40 @@ print("=== Phase 1 PASSED ===")
 '
 if [ $? -ne 0 ]; then echo "PHASE 1 FAILED — PyTorch/CUDA check failed"; exit 1; fi
 
-echo "=== Phase 1.5: Install mamba-ssm with sm_120 support ==="
+echo "=== Phase 1.5: Build mamba-ssm from source with sm_120 patch ==="
+# Per https://github.com/state-spaces/mamba/issues/745
+# mamba-ssm setup.py doesn't include sm_120 — must patch and compile from source
 apptainer exec --nv --bind "/dev/shm,/tmp,$P" \
     --env PYTHONUNBUFFERED=1 --env TORCH_COMPILE_DISABLE=1 \
-    --env TORCH_CUDA_ARCH_LIST="9.0;12.0" \
+    --env TORCH_CUDA_ARCH_LIST="12.0" \
     --env FORCE_CUDA=1 \
+    --env MAX_JOBS=4 \
     $C bash -c '
-echo "Building causal_conv1d with TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
-pip install --no-build-isolation "causal_conv1d>=1.5.2" 2>&1 | tail -5
-echo "Building mamba_ssm with TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
-pip install --no-build-isolation "mamba_ssm>=2.2.5" 2>&1 | tail -5
-python3 -c "import mamba_ssm; print(f\"mamba_ssm {mamba_ssm.__version__} OK\")"
+set -e
+
+# Step 1: Build causal_conv1d from source with sm_120
+echo "--- Building causal_conv1d from source ---"
+cd /tmp
+git clone https://github.com/Dao-AILab/causal-conv1d.git 2>/dev/null || (cd causal-conv1d && git pull)
+cd causal-conv1d
+# Patch setup.py to add sm_120
+sed -i "/sm_90/a\\    cc_flag.append(\"-gencode\")\\n    cc_flag.append(\"arch=compute_120,code=sm_120\")" setup.py 2>/dev/null || true
+TORCH_CUDA_ARCH_LIST="12.0" pip install -e . --no-build-isolation 2>&1 | tail -5
 python3 -c "import causal_conv1d; print(f\"causal_conv1d {causal_conv1d.__version__} OK\")"
+
+# Step 2: Build mamba-ssm from source with sm_120
+echo "--- Building mamba-ssm from source ---"
+cd /tmp
+git clone https://github.com/state-spaces/mamba.git 2>/dev/null || (cd mamba && git pull)
+cd mamba
+# Patch setup.py to add sm_120 after sm_90 line
+sed -i "/sm_90/a\\    cc_flag.append(\"-gencode\")\\n    cc_flag.append(\"arch=compute_120,code=sm_120\")" setup.py 2>/dev/null || true
+TORCH_CUDA_ARCH_LIST="12.0" pip install -e . --no-build-isolation 2>&1 | tail -10
+python3 -c "import mamba_ssm; print(f\"mamba_ssm {mamba_ssm.__version__} OK\")"
+echo "=== Phase 1.5 PASSED ==="
 '
-if [ $? -ne 0 ]; then echo "WARNING: mamba-ssm install failed, will try without"; fi
+MAMBA_RC=$?
+if [ $MAMBA_RC -ne 0 ]; then echo "PHASE 1.5 FAILED (exit=$MAMBA_RC) — mamba-ssm compilation failed"; exit 1; fi
 
 echo "=== Phase 2: Quick training test (10 steps) ==="
 

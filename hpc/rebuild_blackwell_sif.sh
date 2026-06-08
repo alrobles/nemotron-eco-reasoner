@@ -77,8 +77,29 @@ print("sm_120 (Blackwell) support: CONFIRMED")
     pip install --no-cache-dir -q unsloth unsloth_zoo
 
     # mamba-ssm + causal-conv1d for Nemotron Mamba-2 layers
-    pip install --no-cache-dir -q mamba-ssm causal-conv1d || \
-        echo "WARNING: mamba-ssm build failed — will use naive MoE fallback at runtime"
+    # Must build from source with sm_120 patch — pip wheels don't include Blackwell
+    # Ref: https://github.com/state-spaces/mamba/issues/745
+    export TORCH_CUDA_ARCH_LIST="9.0;12.0"
+    export FORCE_CUDA=1
+    export MAX_JOBS=4
+
+    # causal-conv1d from source with sm_120
+    cd /tmp && git clone https://github.com/Dao-AILab/causal-conv1d.git
+    cd causal-conv1d
+    sed -i '/sm_90/a\    cc_flag.append("-gencode")\n    cc_flag.append("arch=compute_120,code=sm_120")' setup.py || true
+    pip install -e . --no-build-isolation 2>&1 | tail -5
+    python3 -c "import causal_conv1d; print(f'causal_conv1d {causal_conv1d.__version__} OK')"
+
+    # mamba-ssm from source with sm_120
+    cd /tmp && git clone https://github.com/state-spaces/mamba.git
+    cd mamba
+    sed -i '/sm_90/a\    cc_flag.append("-gencode")\n    cc_flag.append("arch=compute_120,code=sm_120")' setup.py || true
+    pip install -e . --no-build-isolation 2>&1 | tail -10
+    python3 -c "import mamba_ssm; print(f'mamba_ssm {mamba_ssm.__version__} OK')" || \
+        echo "WARNING: mamba-ssm build failed — will need runtime compilation on GPU node"
+
+    # Cleanup build artifacts
+    rm -rf /tmp/causal-conv1d /tmp/mamba
 
     # Final verification
     python3 -c '
