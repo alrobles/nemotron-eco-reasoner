@@ -49,34 +49,43 @@ pip install --user --no-cache-dir -q --no-deps unsloth_zoo unsloth rich "trl==0.
 GPU_NAME=$(python3 -c 'import torch; print(torch.cuda.get_device_name(0))' 2>/dev/null || echo "nogpu")
 SM_VER=$(python3 -c 'import torch; print(int(torch.cuda.get_device_capability(0)[0]*10))' 2>/dev/null || echo "0")
 echo "GPU: $GPU_NAME | SM: $SM_VER"
+MPREFIX=/tmp/mamba_prefix
 if [ "$SM_VER" = "120" ] || echo "$GPU_NAME" | grep -qi "PRO 6000"; then
     echo "=== Blackwell detected — building mamba-ssm+causal-conv1d from source for sm_120 ==="
     export TORCH_CUDA_ARCH_LIST="9.0;12.0"
     export MAX_JOBS=4
-    # causal-conv1d first (mamba-ssm depends on it)
-    rm -rf /tmp/causal-conv1d /tmp/mamba
-    cd /tmp && git clone -q https://github.com/Dao-AILab/causal-conv1d.git && cd causal-conv1d && \
+    rm -rf /tmp/causal-conv1d /tmp/mamba $MPREFIX
+    mkdir -p $MPREFIX
+    # causal-conv1d
+    cd /tmp && git clone -q https://github.com/Dao-AILab/causal-conv1d.git && cd causal-conv1d
     python3 -c "
 f=open('setup.py','r');t=f.read();f.close()
 old='cc_flag.append(\"arch=compute_90,code=sm_90\")'
 new=old+'\n    cc_flag.append(\"-gencode\")\n    cc_flag.append(\"arch=compute_120,code=sm_120\")'
 f=open('setup.py','w');f.write(t.replace(old,new));f.close()
 print('causal-conv1d setup.py patched for sm_120')
-" && pip install --user --no-cache-dir . --no-build-isolation 2>&1 | tail -3 && \
-    python3 -c 'import causal_conv1d; print(f\"causal_conv1d {causal_conv1d.__version__} OK\")'
+" || { echo "FATAL: causal-conv1d patch failed"; exit 1; }
+    pip install --prefix=$MPREFIX . --no-build-isolation || { echo "FATAL: causal-conv1d install failed"; exit 1; }
     # mamba-ssm
-    cd /tmp && git clone -q https://github.com/state-spaces/mamba.git && cd mamba && \
+    rm -rf /tmp/mamba
+    cd /tmp && git clone -q https://github.com/state-spaces/mamba.git && cd mamba
     python3 -c "
 f=open('setup.py','r');t=f.read();f.close()
 old='cc_flag.append(\"arch=compute_90,code=sm_90\")'
 new=old+'\n    cc_flag.append(\"-gencode\")\n    cc_flag.append(\"arch=compute_120,code=sm_120\")'
 f=open('setup.py','w');f.write(t.replace(old,new));f.close()
 print('mamba-ssm setup.py patched for sm_120')
-" && pip install --user --no-cache-dir . --no-build-isolation 2>&1 | tail -3 && \
-    python3 -c 'import mamba_ssm; print(f\"mamba_ssm {mamba_ssm.__version__} OK\")'
+" || { echo "FATAL: mamba-ssm patch failed"; exit 1; }
+    pip install --prefix=$MPREFIX . --no-build-isolation || { echo "FATAL: mamba-ssm install failed"; exit 1; }
     rm -rf /tmp/causal-conv1d /tmp/mamba
-    echo "=== mamba-ssm build complete ==="
+    # Verify imports via explicit PYTHONPATH
+    export PYTHONPATH=$MPREFIX/lib/python3.12/site-packages:$PYTHONPATH
+    python3 -c 'import causal_conv1d; print(f"causal_conv1d OK")' || { echo "FATAL: causal_conv1d import failed"; exit 1; }
+    python3 -c 'import mamba_ssm; print(f"mamba_ssm OK")' || { echo "FATAL: mamba_ssm import failed"; exit 1; }
+    echo "=== mamba-ssm build verified ==="
 else
+    MPREFIX=""
+    export PYTHONPATH=""
     # Standard GPUs (A100, V100, Q6000, etc.) — try pip wheels
     pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1 || echo "mamba-ssm pip skip (non-critical on non-Blackwell)"
 fi
@@ -93,7 +102,7 @@ apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" \
     --env TORCH_COMPILE_DISABLE=1 --env OMP_NUM_THREADS=1 \
     --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
     --env MODEL_PATH=$M --env DATA_PATH=$D --env OUT_PATH=$O \
-    --env JOBID=$JOBID \
+    --env JOBID=$JOBID --env PYTHONPATH=/tmp/mamba_prefix/lib/python3.12/site-packages:\$PYTHONPATH \
     $C env PYTHONUNBUFFERED=1 python3 -u << 'PYEOF'
 import os, sys, signal, types, torch, time, json, glob
 from datasets import load_dataset
