@@ -36,8 +36,8 @@ GPU_SPECS = {
     "a40":     {"vram": 48, "bf16": True,  "arch": "ampere",    "seq": 1024, "rank": 16, "min_mem": 64, "sif": "cuda"},
     "l40":     {"vram": 48, "bf16": True,  "arch": "ada",       "seq": 1024, "rank": 16, "min_mem": 64, "sif": "cuda"},
     "q8000":   {"vram": 48, "bf16": False, "arch": "turing",    "seq": 512,  "rank": 8,  "min_mem": 48, "sif": "cuda"},
-    "q6000":   {"vram": 24, "bf16": False, "arch": "turing",    "seq": 256,  "rank": 4,  "min_mem": 48, "sif": "cuda"},
-    "v100":    {"vram": 32, "bf16": False, "arch": "volta",     "seq": 256,  "rank": 4,  "min_mem": 48, "sif": "cuda"},
+    "q6000":   {"vram": 24, "bf16": False, "arch": "turing",    "seq": 128,  "rank": 4,  "min_mem": 48, "sif": "cuda"},
+    "v100":    {"vram": 32, "bf16": False, "arch": "volta",     "seq": 128,  "rank": 4,  "min_mem": 48, "sif": "cuda"},
     "mi210":   {"vram": 68, "bf16": True,  "arch": "cdna2",     "seq": 1024, "rank": 16, "min_mem": 64, "sif": "mi210"},
 }
 
