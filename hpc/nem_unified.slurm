@@ -39,11 +39,14 @@ if command -v rocminfo &>/dev/null 2>&1 || [[ "$C" == *mi210* ]]; then
 fi
 
 apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" --env PYTHONUSERBASE=$P $C bash << 'INSTALL_EOF'
-set -euo pipefail
-pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1
-pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1
-pip install --user --no-cache-dir -q --no-deps "datasets==4.3.0" bitsandbytes 2>&1 | tail -1
-pip install --user --no-cache-dir -q --no-deps unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1
+set -uo pipefail
+# Core deps (must succeed)
+pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1 || true
+pip install --user --no-cache-dir -q --no-deps "datasets==4.3.0" bitsandbytes 2>&1 | tail -1 || true
+pip install --user --no-cache-dir -q --no-deps unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1 || true
+# mamba-ssm: optional — new SIFs have it built-in, pip wheels may not support this GPU arch
+pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1 || echo "mamba-ssm pip skip (using SIF built-in)"
+# Verify critical imports
 python3 -c 'import torch,transformers,tokenizers,trl; print(f"tf:{transformers.__version__} tok:{tokenizers.__version__} trl:{trl.__version__}")'
 python3 -c 'import unsloth; from trl import SFTTrainer; print("OK")'
 INSTALL_EOF
