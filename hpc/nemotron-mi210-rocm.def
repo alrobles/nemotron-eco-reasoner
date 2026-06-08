@@ -1,0 +1,66 @@
+Bootstrap: docker
+From: rocm/pytorch:rocm6.2_ubuntu22.04_py3.10_pytorch_release_2.4.0
+
+%labels
+    Author a474r867@ku.edu
+    Description Nemotron-3-Nano-30B training on AMD MI210 (ROCm + mamba-ssm hipified)
+    Version 1.0-mi210-rocm
+
+%environment
+    export TORCH_COMPILE_DISABLE=1
+    export OMP_NUM_THREADS=1
+    export TOKENIZERS_PARALLELISM=false
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    export HIP_ARCHITECTURES=gfx90a
+
+%post
+    apt-get update -qq && apt-get install -y -qq git wget curl build-essential ninja-build 2>/dev/null
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+    python3 -c "import torch; print(f'PyTorch {torch.__version__}'); print(f'ROCm available: {torch.cuda.is_available()}')"
+
+    # Core ML stack
+    pip install --no-cache-dir -q \
+        "transformers==4.57.6" "tokenizers==0.22.2" "datasets==4.3.0" \
+        "trl==0.12.0" "peft>=0.15.0" \
+        "accelerate>=1.0.0" "safetensors>=0.5.0" \
+        "sentencepiece" "protobuf" "rich" \
+        ninja einops triton
+
+    pip install --no-cache-dir -q unsloth unsloth_zoo || true
+
+    # === mamba-ssm + causal-conv1d via hipify (CUDA -> HIP automatic) ===
+    # Ref: https://rocm.blogs.amd.com/artificial-intelligence/mamba/README.html
+    export HIP_ARCHITECTURES=gfx90a
+
+    cd /tmp && git clone https://github.com/Dao-AILab/causal-conv1d.git && cd causal-conv1d
+    pip install . --no-build-isolation || echo "WARNING: causal-conv1d hipify failed"
+    python3 -c "import causal_conv1d; print(f'causal_conv1d {causal_conv1d.__version__} OK')" || true
+
+    cd /tmp && git clone https://github.com/state-spaces/mamba.git && cd mamba
+    pip install . --no-build-isolation || echo "WARNING: mamba-ssm hipify failed"
+    python3 -c "import mamba_ssm; print(f'mamba_ssm {mamba_ssm.__version__} OK')" || true
+
+    rm -rf /tmp/causal-conv1d /tmp/mamba
+
+    pip install --no-cache-dir -q bitsandbytes || true
+
+    # Final verification
+    python3 -c "
+import torch
+print(f'PyTorch {torch.__version__}')
+print(f'ROCm available: {torch.cuda.is_available()}')
+try:
+    import mamba_ssm; print(f'mamba_ssm {mamba_ssm.__version__} OK')
+except Exception as e: print(f'mamba_ssm: {e}')
+try:
+    import causal_conv1d; print(f'causal_conv1d {causal_conv1d.__version__} OK')
+except Exception as e: print(f'causal_conv1d: {e}')
+import transformers, trl, peft
+print(f'transformers={transformers.__version__} trl={trl.__version__} peft={peft.__version__}')
+print('=== Container verification done ===')
+"
+
+%runscript
+    exec python3 "$@"
