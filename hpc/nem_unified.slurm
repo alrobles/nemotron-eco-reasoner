@@ -14,6 +14,9 @@ export APPTAINER_WRITABLE_TMPFS=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TORCH_COMPILE_DISABLE=1
 export OMP_NUM_THREADS=1
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export PYTHONUNBUFFERED=1
 
 C=/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-cuda.sif
 M=/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848
@@ -43,6 +46,7 @@ echo "=== Training ==="
 apptainer exec --nv --bind "/dev/shm,/tmp" \
     --env PYTHONUSERBASE=$P --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env TORCH_COMPILE_DISABLE=1 --env OMP_NUM_THREADS=1 \
+    --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
     --env MODEL_PATH=$M --env DATA_PATH=$D --env OUT_PATH=$O \
     --env JOBID=$JOBID \
     $C env PYTHONUNBUFFERED=1 python3 -u << 'PYEOF'
@@ -66,9 +70,9 @@ if vram_gb>=90:
 elif vram_gb>=40:
     SEQ_LEN,RANK=1024,16;  TAG="HEAVY"
 elif vram_gb>=30:
-    SEQ_LEN,RANK=64,8;     TAG="MEDIUM"
+    SEQ_LEN,RANK=256,8;    TAG="MEDIUM"
 else:
-    SEQ_LEN,RANK=48,4;     TAG="LIGHT"
+    SEQ_LEN,RANK=256,4;    TAG="LIGHT"
 
 print(f"GPU: {gpu_name} ({vram_gb:.1f}GB) CC={cc} bf16={bf16_ok} | seq={SEQ_LEN} rank={RANK} [{TAG}]")
 

@@ -151,15 +151,45 @@ def fmt(ex):
 ds = ds.map(fmt)
 print(f"  {len(ds)} texts formatted")
 
+# ── Checkpoint resume (BEFORE trainer creation) ───────────────────
+# Must resolve global_step before SFTConfig uses it in max_steps
+import glob as _glob
+from peft import PeftModel
+
+global_step = 0
+resume_from = None
+if RESUME_CHECKPOINT == "True" or RESUME_CHECKPOINT == "true" or RESUME_CHECKPOINT:
+    ckpts = sorted(_glob.glob(os.path.join(OUT_PATH, "checkpoint-*")), key=os.path.getmtime)
+    valid_ckpts = [c for c in ckpts if os.path.exists(os.path.join(c, "adapter_model.safetensors"))]
+    if valid_ckpts:
+        latest = valid_ckpts[-1]
+        model = PeftModel.from_pretrained(model, latest, is_trainable=True)
+        state_file = os.path.join(latest, "trainer_state.json")
+        if os.path.exists(state_file):
+            try:
+                state = json.load(open(state_file))
+                global_step = state.get("global_step", 0)
+            except Exception:
+                pass
+        resume_from = latest
+        print(f"  Adapter loaded from: {latest} (global step: {global_step})")
+    else:
+        print("  No valid checkpoint found, training from scratch")
+else:
+    print("  Fresh start — no resume requested")
+
 # ── Train ─────────────────────────────────────────────────────────
 from trl import SFTTrainer, SFTConfig
 
+target_total = global_step + MAX_STEPS
 trainer = SFTTrainer(
     model=model,
     args=SFTConfig(
-        output_dir=OUT_PATH, max_steps=global_step+MAX_STEPS, per_device_train_batch_size=1,
+        output_dir=OUT_PATH, max_steps=target_total, per_device_train_batch_size=1,
         gradient_accumulation_steps=GRAD_ACCUM, learning_rate=LEARNING_RATE, max_seq_length=MAX_SEQ_LEN,
-        warmup_steps=50, logging_steps=10, save_steps=SAVE_STEPS, save_total_limit=3,
+        warmup_steps=50 if global_step == 0 else 0,
+        lr_scheduler_type="constant_with_warmup",
+        logging_steps=10, save_steps=SAVE_STEPS, save_total_limit=3,
         bf16=not USE_FP16, fp16=USE_FP16,
         remove_unused_columns=False, report_to="none",
         dataloader_num_workers=0, packing=True,
@@ -168,30 +198,7 @@ trainer = SFTTrainer(
 )
 _trainer = trainer  # expose for SIGUSR1 handler
 
-print("TRAINING with Unsloth 4-bit QLoRA...")
-
-# Checkpoint resume logic — load adapter via PeftModel, skip .pt files (torch 2.5.1 compat)
-resume_from = None
-global_step = 0
-if RESUME_CHECKPOINT == "True" or RESUME_CHECKPOINT == "true" or RESUME_CHECKPOINT:
-    import glob as _glob
-    ckpts = sorted(_glob.glob(os.path.join(OUT_PATH, "checkpoint-*")), key=os.path.getmtime)
-    # Only use checkpoints that have adapter_model.safetensors
-    valid_ckpts = [c for c in ckpts if os.path.exists(os.path.join(c, "adapter_model.safetensors"))]
-    if valid_ckpts:
-        latest = valid_ckpts[-1]
-        from peft import PeftModel
-        model = PeftModel.from_pretrained(model, latest, is_trainable=True)
-        # Try to read global step
-        state_file = os.path.join(latest, "trainer_state.json")
-        if os.path.exists(state_file):
-            try:
-                state = json.load(open(state_file))
-                global_step = state.get("global_step", 0)
-            except: pass
-        print(f"  Adapter loaded from: {latest} (global step: {global_step})")
-    else:
-        print("  No valid checkpoint found, training from scratch")
+print(f"TRAINING with Unsloth 4-bit QLoRA: step {global_step} -> {target_total}")
 
 try:
     trainer.train(resume_from_checkpoint=resume_from)

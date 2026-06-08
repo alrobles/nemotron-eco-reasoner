@@ -72,10 +72,21 @@ def load_api_keys():
 
 def extract_boxed(text: str) -> str:
     """Extract answer from \\boxed{...} in generated text."""
-    # Match \boxed{...} allowing nested braces
-    pattern = r'\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
-    matches = re.findall(pattern, text)
-    return matches[-1] if matches else ""
+    # Try multiple patterns for different formatting
+    patterns = [
+        r'\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}',
+        r'boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}',
+    ]
+    for pattern in patterns:
+        matches = re.findall(pattern, text)
+        if matches:
+            ans = matches[-1].strip()
+            # Remove \text{} wrapper if present
+            m = re.match(r'^\\text\{(.*)\}$', ans)
+            if m:
+                ans = m.group(1)
+            return ans
+    return ""
 
 
 def normalize_answer(ans: str) -> str:
@@ -84,7 +95,28 @@ def normalize_answer(ans: str) -> str:
     # Remove \boxed{} wrapper if present
     if ans.startswith("\\boxed{") and ans.endswith("}"):
         ans = ans[7:-1]
+    # Remove \text{} wrapper
+    m = re.match(r'^\\text\{(.*)\}$', ans.strip())
+    if m:
+        ans = m.group(1)
     return ans.strip()
+
+
+def answers_match(generated: str, ground_truth: str) -> bool:
+    """Compare answers with tolerance for numeric values."""
+    g = normalize_answer(generated)
+    t = normalize_answer(ground_truth)
+    if g == t:
+        return True
+    # Try numeric comparison with tolerance
+    try:
+        gf = float(g)
+        tf = float(t)
+        return abs(gf - tf) < 0.05  # tolerance for rounding
+    except (ValueError, TypeError):
+        pass
+    # Case-insensitive for text answers
+    return g.lower() == t.lower()
 
 
 async def generate_cot_deepseek(puzzle: str, api_key: str, semaphore: asyncio.Semaphore) -> dict:
@@ -100,7 +132,7 @@ async def generate_cot_deepseek(puzzle: str, api_key: str, semaphore: asyncio.Se
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": puzzle}
             ],
-            "max_tokens": 2000,
+            "max_tokens": 4000,
             "temperature": 0.3,
             "top_p": 0.95,
         }
@@ -148,7 +180,7 @@ async def generate_cot_opencode(puzzle: str, api_key: str, semaphore: asyncio.Se
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": puzzle}
             ],
-            "max_tokens": 2000,
+            "max_tokens": 4000,
             "temperature": 0.3,
         }
 
@@ -305,7 +337,7 @@ async def main():
                 ground_truth = normalize_answer(puzzle["answer"])
 
                 # Check if generated answer matches ground truth
-                match = normalize_answer(generated_answer) == ground_truth
+                match = answers_match(generated_answer, ground_truth)
 
                 if match:
                     total_match += 1
