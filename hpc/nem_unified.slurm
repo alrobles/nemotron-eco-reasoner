@@ -65,6 +65,23 @@ else
     pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1
     python3 -c "import mamba_ssm; print("mamba-ssm OK")" || { echo "FATAL: mamba_ssm required but not installed"; exit 1; }
 fi
+# CRITICAL: purge any pip-installed torch that shadows the SIF's built-in torch
+# (unsloth_zoo wheels can bundle torch; --no-deps doesn't prevent wheel-included deps)
+SIF_TORCH_VER=$(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null)
+echo "SIF torch: $SIF_TORCH_VER"
+rm -rf $VIRTUAL_ENV/lib/python3*/site-packages/torch* \
+       $VIRTUAL_ENV/lib/python3*/site-packages/triton* \
+       $VIRTUAL_ENV/lib/python3*/site-packages/nvidia* 2>/dev/null
+# If using --user installs
+rm -rf $HOME/.local/lib/python3*/site-packages/torch* \
+       $HOME/.local/lib/python3*/site-packages/triton* \
+       $HOME/.local/lib/python3*/site-packages/nvidia* 2>/dev/null
+# Verify SIF torch still intact (not shadowed)
+ACTUAL_TORCH=$(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null)
+if [ "$ACTUAL_TORCH" != "$SIF_TORCH_VER" ]; then
+    echo "WARNING: torch changed from $SIF_TORCH_VER to $ACTUAL_TORCH after pip installs"
+fi
+echo "Active torch: $ACTUAL_TORCH"
 # Verify critical imports
 python3 -c 'import torch,transformers,tokenizers,trl; print(f"tf:{transformers.__version__} tok:{tokenizers.__version__} trl:{trl.__version__}")'
 python3 -c 'import unsloth; from trl import SFTTrainer; print("OK")'
