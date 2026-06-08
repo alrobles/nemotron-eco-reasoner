@@ -74,7 +74,7 @@ def run(cmd, timeout=15):
 
 def scan_nodes():
     """Scan cluster for available GPU nodes with free slots."""
-    out = run("sinfo -p sixhour -N -o '%N|%T|%m|%G' --noheader 2>/dev/null")
+    out = run("sinfo -p sixhour -N -O 'nodelist:|,statelong:|,memory:|,gres:' --noheader 2>/dev/null")
     nodes = {}
     for line in out.split("\n"):
         parts = line.strip().split("|")
