@@ -60,8 +60,9 @@ elif echo "$GPU_CHECK" | grep -qi "MI210\|mi210\|instinct"; then
     pip install --user --no-deps $ROCM_WHEEL_DIR/causal_conv1d-*.whl 2>&1 | tail -1
     pip install --user --no-deps $ROCM_WHEEL_DIR/mamba_ssm-*.whl 2>&1 | tail -1
 else
-    echo "=== Non-Blackwell: trying pip wheels ==="
-    pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1 || echo "mamba-ssm pip skip (non-critical on non-Blackwell)"
+    echo "=== Non-Blackwell: installing mamba-ssm (required) ==="
+    pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1
+    python3 -c "import mamba_ssm; print("mamba-ssm OK")" || { echo "FATAL: mamba_ssm required but not installed"; exit 1; }
 fi
 # Verify critical imports
 python3 -c 'import torch,transformers,tokenizers,trl; print(f"tf:{transformers.__version__} tok:{tokenizers.__version__} trl:{trl.__version__}")'
