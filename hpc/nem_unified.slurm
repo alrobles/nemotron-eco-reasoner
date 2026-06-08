@@ -44,8 +44,42 @@ set -uo pipefail
 pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1 || true
 pip install --user --no-cache-dir -q --no-deps "datasets==4.3.0" bitsandbytes 2>&1 | tail -1 || true
 pip install --user --no-cache-dir -q --no-deps unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1 || true
-# mamba-ssm: optional — new SIFs have it built-in, pip wheels may not support this GPU arch
-pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1 || echo "mamba-ssm pip skip (using SIF built-in)"
+# mamba-ssm + causal-conv1d: detect GPU arch, build from source for sm_120 (Blackwell)
+# PyPI wheels don't exist for sm_120 yet — must build from source with arch flags
+GPU_NAME=$(python3 -c 'import torch; print(torch.cuda.get_device_name(0))' 2>/dev/null || echo "nogpu")
+SM_VER=$(python3 -c 'import torch; print(int(torch.cuda.get_device_capability(0)[0]*10))' 2>/dev/null || echo "0")
+echo "GPU: $GPU_NAME | SM: $SM_VER"
+if [ "$SM_VER" = "120" ] || echo "$GPU_NAME" | grep -qi "PRO 6000"; then
+    echo "=== Blackwell detected — building mamba-ssm+causal-conv1d from source for sm_120 ==="
+    export TORCH_CUDA_ARCH_LIST="9.0;12.0"
+    export MAX_JOBS=4
+    # causal-conv1d first (mamba-ssm depends on it)
+    rm -rf /tmp/causal-conv1d /tmp/mamba
+    cd /tmp && git clone -q https://github.com/Dao-AILab/causal-conv1d.git && cd causal-conv1d && \
+    python3 -c "
+f=open('setup.py','r');t=f.read();f.close()
+old='cc_flag.append(\"arch=compute_90,code=sm_90\")'
+new=old+'\n    cc_flag.append(\"-gencode\")\n    cc_flag.append(\"arch=compute_120,code=sm_120\")'
+f=open('setup.py','w');f.write(t.replace(old,new));f.close()
+print('causal-conv1d setup.py patched for sm_120')
+" && pip install --user --no-cache-dir . --no-build-isolation 2>&1 | tail -3 && \
+    python3 -c 'import causal_conv1d; print(f\"causal_conv1d {causal_conv1d.__version__} OK\")'
+    # mamba-ssm
+    cd /tmp && git clone -q https://github.com/state-spaces/mamba.git && cd mamba && \
+    python3 -c "
+f=open('setup.py','r');t=f.read();f.close()
+old='cc_flag.append(\"arch=compute_90,code=sm_90\")'
+new=old+'\n    cc_flag.append(\"-gencode\")\n    cc_flag.append(\"arch=compute_120,code=sm_120\")'
+f=open('setup.py','w');f.write(t.replace(old,new));f.close()
+print('mamba-ssm setup.py patched for sm_120')
+" && pip install --user --no-cache-dir . --no-build-isolation 2>&1 | tail -3 && \
+    python3 -c 'import mamba_ssm; print(f\"mamba_ssm {mamba_ssm.__version__} OK\")'
+    rm -rf /tmp/causal-conv1d /tmp/mamba
+    echo "=== mamba-ssm build complete ==="
+else
+    # Standard GPUs (A100, V100, Q6000, etc.) — try pip wheels
+    pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1 || echo "mamba-ssm pip skip (non-critical on non-Blackwell)"
+fi
 # Verify critical imports
 python3 -c 'import torch,transformers,tokenizers,trl; print(f"tf:{transformers.__version__} tok:{tokenizers.__version__} trl:{trl.__version__}")'
 python3 -c 'import unsloth; from trl import SFTTrainer; print("OK")'
