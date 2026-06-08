@@ -2,7 +2,7 @@
 # Blackwell Pro6000 test — 5 min quick test with PyTorch 2.6 upgrade
 #SBATCH --job-name=nem-bw-test
 #SBATCH --partition=sixhour
-#SBATCH --time=00:15:00
+#SBATCH --time=00:30:00
 #SBATCH --gres=gpu:1
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=4
@@ -28,19 +28,22 @@ JOBID=${SLURM_JOB_ID:-$$}
 echo "=== BLACKWELL TEST job=$JOBID $(date) ==="
 echo "=== Phase 1: Upgrade PyTorch for sm_120 (Blackwell) support ==="
 
-apptainer exec --nv --bind "/dev/shm,/tmp" --env PYTHONUSERBASE=$P \
+apptainer exec --nv --bind "/dev/shm,/tmp" \
     --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
-    $C bash << 'INSTALL_EOF'
+    $C bash << INSTALL_EOF
 set -euo pipefail
 
 echo "--- Step 1: Current PyTorch version ---"
 python3 -c 'import torch; print(f"PyTorch {torch.__version__} CUDA {torch.version.cuda}")'
-python3 -c 'import torch; print(f"GPU: {torch.cuda.get_device_name(0)}"); print(f"CC: {torch.cuda.get_device_capability(0)}")'
 
-echo "--- Step 2: Upgrade PyTorch to 2.6+ for Blackwell sm_120 ---"
-pip install --user --no-cache-dir -q \
+echo "--- Step 2: Create isolated venv with PyTorch 2.6+ for Blackwell ---"
+python3 -m venv --system-site-packages $P/venv
+source $P/venv/bin/activate
+
+# Install PyTorch 2.6+ with CUDA 12.8 (has sm_120 Blackwell kernels)
+pip install --no-cache-dir \
     torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu128 2>&1 | tail -3
+    --index-url https://download.pytorch.org/whl/cu128 2>&1 | tail -5
 
 echo "--- Step 3: Verify new PyTorch ---"
 python3 -c '
@@ -49,17 +52,16 @@ print(f"PyTorch {torch.__version__} CUDA {torch.version.cuda}")
 print(f"GPU: {torch.cuda.get_device_name(0)}")
 cc = torch.cuda.get_device_capability(0)
 print(f"Compute Capability: {cc[0]}.{cc[1]}")
-# Quick CUDA test
 x = torch.randn(100, 100, device="cuda")
 y = torch.matmul(x, x.T)
 print(f"CUDA matmul test: OK ({y.shape})")
 print(f"bf16 supported: {torch.cuda.is_bf16_supported()}")
 '
 
-echo "--- Step 4: Install training deps ---"
-pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1
-pip install --user --no-cache-dir -q --no-deps "datasets==4.3.0" bitsandbytes 2>&1 | tail -1
-pip install --user --no-cache-dir -q --no-deps unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1
+echo "--- Step 4: Install training deps in venv ---"
+pip install --no-cache-dir -q "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1
+pip install --no-cache-dir -q "datasets==4.3.0" bitsandbytes 2>&1 | tail -1
+pip install --no-cache-dir -q unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1
 python3 -c 'import transformers, trl; print(f"tf:{transformers.__version__} trl:{trl.__version__}")'
 python3 -c 'import unsloth; from trl import SFTTrainer; print("Unsloth + SFTTrainer: OK")'
 INSTALL_EOF
@@ -67,13 +69,9 @@ INSTALL_EOF
 if [ $? -ne 0 ]; then echo "INSTALL FAILED"; exit 1; fi
 
 echo "=== Phase 2: Quick training test (10 steps) ==="
-apptainer exec --nv --bind "/dev/shm,/tmp" \
-    --env PYTHONUSERBASE=$P --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    --env TORCH_COMPILE_DISABLE=1 --env OMP_NUM_THREADS=1 \
-    --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
-    --env MODEL_PATH=$M --env DATA_PATH=$D --env OUT_PATH=$O \
-    --env JOBID=$JOBID --env STEPS_PER_JOB=10 \
-    $C env PYTHONUNBUFFERED=1 python3 -u << 'PYEOF'
+
+# Write training script to temp file (avoids heredoc+venv issues)
+cat > $P/blackwell_train.py << 'PYEOF'
 import os, sys, types, torch, time, json
 from datasets import load_dataset
 os.environ['TORCH_COMPILE_DISABLE']='1'
@@ -183,4 +181,13 @@ manifest={"gpu":gpu_name,"vram_gb":round(vram_gb,1),"cc":f"{cc[0]}.{cc[1]}",
 with open(os.path.join(OUT_PATH,f"blackwell-test-{JOBID}.json"),"w") as f:
     json.dump(manifest,f,indent=2)
 PYEOF
+
+# Run training script inside container using the venv python
+apptainer exec --nv --bind "/dev/shm,/tmp" \
+    --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    --env TORCH_COMPILE_DISABLE=1 --env OMP_NUM_THREADS=1 \
+    --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
+    --env MODEL_PATH=$M --env DATA_PATH=$D --env OUT_PATH=$O \
+    --env JOBID=$JOBID --env STEPS_PER_JOB=10 \
+    $C bash -c "source $P/venv/bin/activate && PYTHONUNBUFFERED=1 python3 -u $P/blackwell_train.py"
 echo "Exit: $?"
