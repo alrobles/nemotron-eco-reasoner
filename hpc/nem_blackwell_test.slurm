@@ -41,17 +41,12 @@ python3 -m venv $P/venv
 source $P/venv/bin/activate
 pip install --upgrade pip 2>&1 | tail -1
 
-# Try multiple PyTorch sources in order of preference
-echo "--- Trying PyTorch 2.6+ with CUDA 12.6 (sm_120 Blackwell support) ---"
+# PyTorch 2.7.1+cu128 confirmed working with RTX PRO 6000 Blackwell sm_120
+# See: https://github.com/pytorch/pytorch/issues/157549
+echo "--- Installing PyTorch 2.7.1+cu128 (confirmed sm_120 Blackwell support) ---"
 pip install --no-cache-dir \
-    "torch>=2.6.0" torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu126 2>&1 | tail -5 || \
-pip install --no-cache-dir \
-    "torch>=2.6.0" torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cu124 2>&1 | tail -5 || \
-pip install --no-cache-dir --pre \
     torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/nightly/cu126 2>&1 | tail -5
+    --index-url https://download.pytorch.org/whl/cu128 2>&1 | tail -5
 
 echo "--- Step 3: Verify new PyTorch ---"
 python3 -c '
