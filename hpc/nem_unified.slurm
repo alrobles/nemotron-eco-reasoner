@@ -45,6 +45,7 @@ set -uo pipefail
 pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1 || true
 pip install --user --no-cache-dir -q --no-deps "datasets==4.3.0" bitsandbytes 2>&1 | tail -1 || true
 pip install --user --no-cache-dir -q --no-deps unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1 || true
+pip install --user --no-cache-dir -q --no-deps einops 2>&1 | tail -1 || true
 # mamba-ssm + causal-conv1d: pre-built wheels for Blackwell, pip wheels for others
 # Wheels at /home/a474r867/scratch/wheels/ (440MB, compiled on Blackwell GPU)
 WHEEL_DIR=/home/a474r867/scratch/wheels

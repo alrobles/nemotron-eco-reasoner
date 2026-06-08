@@ -26,7 +26,7 @@ TEMPLATE = os.path.join(REPO, "hpc/nem_unified.slurm")
 SIF = {
     "cuda":     os.path.join(REPO, "nemotron-cuda.sif"),
     "blackwell": os.path.join(REPO, "nemotron-blackwell.sif"),
-    "mi210":    os.path.join(REPO, "nemotron-mi210.sif"),
+    "mi210":    os.path.join(REPO, "nemotron-rocm.sif"),
 }
 
 # GPU specs: vram, bf16, arch, recommended seq/rank, min RAM for job
