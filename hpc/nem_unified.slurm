@@ -54,6 +54,11 @@ if echo "$GPU_CHECK" | grep -qi "PRO 6000\|blackwell"; then
     echo "=== Blackwell: installing pre-built mamba wheels (2s) ==="
     pip install --user --no-deps $WHEEL_DIR/causal_conv1d-1.4.0-cp312-cp312-linux_x86_64.whl 2>&1 | tail -1
     pip install --user --no-deps $WHEEL_DIR/mamba_ssm-2.2.4-cp312-cp312-linux_x86_64.whl 2>&1 | tail -1
+elif echo "$GPU_CHECK" | grep -qi "MI210\|mi210\|instinct"; then
+    echo "=== MI210 ROCm: installing pre-built ROCm wheels ==="
+    ROCM_WHEEL_DIR=/home/a474r867/scratch/wheels_rocm
+    pip install --user --no-deps $ROCM_WHEEL_DIR/causal_conv1d-*.whl 2>&1 | tail -1
+    pip install --user --no-deps $ROCM_WHEEL_DIR/mamba_ssm-*.whl 2>&1 | tail -1
 else
     echo "=== Non-Blackwell: trying pip wheels ==="
     pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1 || echo "mamba-ssm pip skip (non-critical on non-Blackwell)"
