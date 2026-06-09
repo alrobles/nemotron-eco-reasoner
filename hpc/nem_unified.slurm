@@ -63,7 +63,7 @@ elif echo "$GPU_CHECK" | grep -qi "MI210\|mi210\|instinct"; then
 else
     echo "=== Non-Blackwell: installing mamba-ssm (required) ==="
     pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1
-    python3 -c "import mamba_ssm; print("mamba-ssm OK")" || { echo "FATAL: mamba_ssm required but not installed"; exit 1; }
+    python3 -c 'import mamba_ssm; print("mamba-ssm OK")' || { echo "FATAL: mamba_ssm required but not installed"; exit 1; }
 fi
 # CRITICAL: purge any pip-installed torch that shadows the SIF's built-in torch
 # (unsloth_zoo wheels can bundle torch; --no-deps doesn't prevent wheel-included deps)
