@@ -32,7 +32,7 @@ GPU_SPECS = {
     "mi210":   {"vram": 68, "bf16": True,  "arch": "cdna2",     "seq": 2048, "rank": 32, "min_mem": 64, "sif": "mi210"},
     "a40":     {"vram": 48, "bf16": True,  "arch": "ampere",    "seq": 1024, "rank": 16, "min_mem": 48, "sif": "cuda"},
     "l40":     {"vram": 48, "bf16": True,  "arch": "ada",       "seq": 1024, "rank": 16, "min_mem": 48, "sif": "cuda"},
-    "pro6000": {"vram": 48, "bf16": True,  "arch": "blackwell", "seq": 2048, "rank": 32, "min_mem": 48, "sif": "blackwell"},
+    "pro6000": {"vram": 96, "bf16": True,  "arch": "blackwell", "seq": 2048, "rank": 32, "min_mem": 48, "sif": "blackwell"},
     "q8000":   {"vram": 48, "bf16": False, "arch": "turing",    "seq": 512,  "rank": 8,  "min_mem": 32, "sif": "cuda"},
     "v100":    {"vram": 32, "bf16": False, "arch": "volta",     "seq": 256,  "rank": 8,  "min_mem": 32, "sif": "cuda"},
     "q6000":   {"vram": 24, "bf16": False, "arch": "turing",    "seq": 128,  "rank": 4,  "min_mem": 24, "sif": "cuda"},
@@ -150,7 +150,7 @@ def submit_job(gtype, mem_gb, dry_run=False):
     mem = max(mem, spec["min_mem"])
 
     # Use --gres=gpu:1 so Slurm picks any free GPU, not a specific node
-    cmd = (f'sbatch --job-name=nem --mem={mem}G --gres=gpu:1 '
+    cmd = (f'sbatch --job-name=nem --mem={mem}G --gres=gpu:{gtype}:1 '
            f'--export=ALL,CONTAINER_SIF={sif_path} '
            f'{TEMPLATE} 2>/dev/null')
 
