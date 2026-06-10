@@ -164,8 +164,8 @@ _trainer=trainer
 
 # === ACCURACY EVAL CALLBACK (every 25 steps) ===
 EVAL_DATA = os.environ.get("EVAL_DATA", "/home/a474r867/scratch/nemotron-eco-reasoner/data/kaggle_5k_train.jsonl")
-EVAL_EVERY = int(os.environ.get("EVAL_EVERY", "25"))
-EVAL_N = int(os.environ.get("EVAL_N", "20"))
+EVAL_EVERY = int(os.environ.get("EVAL_EVERY", "50"))
+EVAL_N = int(os.environ.get("EVAL_N", "8"))
 import random as _random
 _eval_ds = None
 _eval_samples = None
