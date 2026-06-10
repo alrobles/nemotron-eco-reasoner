@@ -17,6 +17,7 @@ export OMP_NUM_THREADS=1
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export PYTHONUNBUFFERED=1
+export TRITON_CACHE_DIR=/tmp/triton_$SLURM_JOB_ID
 
 # SIF: use CONTAINER_SIF from orchestrator, or default to cuda
 C=${CONTAINER_SIF:-/home/a474r867/scratch/nemotron-eco-reasoner/nemotron-cuda.sif}
@@ -38,14 +39,50 @@ if command -v rocminfo &>/dev/null 2>&1 || [[ "$C" == *mi210* ]]; then
     GPU_FLAG="--rocm"
 fi
 
-apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" --env PYTHONUSERBASE=$P $C bash << 'INSTALL_EOF'
+apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" --env PYTHONUSERBASE=$P --env TRITON_CACHE_DIR=/tmp/triton_$SLURM_JOB_ID $C bash << 'INSTALL_EOF'
 set -uo pipefail
 # Core deps (must succeed)
 pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1 || true
 pip install --user --no-cache-dir -q --no-deps "datasets==4.3.0" bitsandbytes 2>&1 | tail -1 || true
 pip install --user --no-cache-dir -q --no-deps unsloth_zoo unsloth rich "trl==0.12.0" 2>&1 | tail -1 || true
-# mamba-ssm: optional — new SIFs have it built-in, pip wheels may not support this GPU arch
-pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1 || echo "mamba-ssm pip skip (using SIF built-in)"
+pip install --user --no-cache-dir -q --no-deps einops 2>&1 | tail -1 || { echo "FATAL: einops install failed"; exit 1; }
+# mamba-ssm + causal-conv1d: pre-built wheels for Blackwell, pip wheels for others
+# Wheels at /home/a474r867/scratch/wheels/ (440MB, compiled on Blackwell GPU)
+WHEEL_DIR=/home/a474r867/scratch/wheels
+GPU_CHECK=$(python3 -c 'import torch; n=torch.cuda.get_device_name(0); print(n)' 2>/dev/null || echo "nogpu")
+echo "GPU: $GPU_CHECK"
+if echo "$GPU_CHECK" | grep -qi "PRO 6000\|blackwell"; then
+    echo "=== Blackwell: installing pre-built mamba wheels (2s) ==="
+    pip install --user --no-deps $WHEEL_DIR/causal_conv1d-1.4.0-cp312-cp312-linux_x86_64.whl 2>&1 | tail -1
+    pip install --user --no-deps $WHEEL_DIR/mamba_ssm-2.2.4-cp312-cp312-linux_x86_64.whl 2>&1 | tail -1
+elif echo "$GPU_CHECK" | grep -qi "MI210\|mi210\|instinct"; then
+    echo "=== MI210 ROCm: installing pre-built ROCm wheels ==="
+    ROCM_WHEEL_DIR=/home/a474r867/scratch/wheels_rocm
+    pip install --user --no-deps $ROCM_WHEEL_DIR/causal_conv1d-*.whl 2>&1 | tail -1
+    pip install --user --no-deps $ROCM_WHEEL_DIR/mamba_ssm-*.whl 2>&1 | tail -1
+else
+    echo "=== Non-Blackwell: installing mamba-ssm (required) ==="
+    pip install --user --no-cache-dir -q --no-deps mamba-ssm causal-conv1d 2>&1 | tail -1
+    python3 -c 'import mamba_ssm; print("mamba-ssm OK")' || { echo "FATAL: mamba_ssm required but not installed"; exit 1; }
+fi
+# CRITICAL: purge any pip-installed torch that shadows the SIF's built-in torch
+# (unsloth_zoo wheels can bundle torch; --no-deps doesn't prevent wheel-included deps)
+SIF_TORCH_VER=$(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null)
+VIRTUAL_ENV=${PYTHONUSERBASE:-$HOME/.local}
+echo "SIF torch: $SIF_TORCH_VER"
+rm -rf $VIRTUAL_ENV/lib/python3*/site-packages/torch* \
+       $VIRTUAL_ENV/lib/python3*/site-packages/triton* \
+       $VIRTUAL_ENV/lib/python3*/site-packages/nvidia* 2>/dev/null
+# If using --user installs
+rm -rf $HOME/.local/lib/python3*/site-packages/torch* \
+       $HOME/.local/lib/python3*/site-packages/triton* \
+       $HOME/.local/lib/python3*/site-packages/nvidia* 2>/dev/null
+# Verify SIF torch still intact (not shadowed)
+ACTUAL_TORCH=$(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null)
+if [ "$ACTUAL_TORCH" != "$SIF_TORCH_VER" ]; then
+    echo "WARNING: torch changed from $SIF_TORCH_VER to $ACTUAL_TORCH after pip installs"
+fi
+echo "Active torch: $ACTUAL_TORCH"
 # Verify critical imports
 python3 -c 'import torch,transformers,tokenizers,trl; print(f"tf:{transformers.__version__} tok:{tokenizers.__version__} trl:{trl.__version__}")'
 python3 -c 'import unsloth; from trl import SFTTrainer; print("OK")'
@@ -59,7 +96,7 @@ apptainer exec $GPU_FLAG --bind "/dev/shm,/tmp" \
     --env TORCH_COMPILE_DISABLE=1 --env OMP_NUM_THREADS=1 \
     --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
     --env MODEL_PATH=$M --env DATA_PATH=$D --env OUT_PATH=$O \
-    --env JOBID=$JOBID \
+    --env JOBID=$JOBID --env TRITON_CACHE_DIR=/tmp/triton_$SLURM_JOB_ID \
     $C env PYTHONUNBUFFERED=1 python3 -u << 'PYEOF'
 import os, sys, signal, types, torch, time, json, glob
 from datasets import load_dataset
@@ -175,7 +212,7 @@ trainer.save_model(ckpt_dir)
 tok.save_pretrained(ckpt_dir)
 
 elapsed=(time.time()-t0)/60
-final_loss=trainer.state.log_history[-1].get("loss","?") if trainer.state.log_history else "?"
+final_loss=trainer.state.log_history[-1].get('loss') or trainer.state.log_history[-1].get('train_loss','?') if trainer.state.log_history else '?'
 
 print(f"DONE {elapsed:.1f}min steps={global_step}->{target_total} loss={final_loss}")
 
