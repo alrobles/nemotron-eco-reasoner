@@ -1,107 +1,223 @@
-# Nemotron Eco-Reasoner
+# Nemotron Eco-Reasoner — Kaggle Nemotron Reasoning Challenge
 
-**🟢 TRAINING ACTIVE — Jun 6, 2026 02:30 CST | 8 GPUs, loss 18→5.9**  
-First successful Nemotron-3-Nano-30B-A3B fine-tuning. 7× Q6000 (24GB) + 1× A100 (40GB).  
-Recipe: Unsloth 4-bit QLoRA + MoE monkey-patch + isolated deps.  
-[Full report →](docs/q6000-training.md) | [Knowledgebase →](https://github.com/alrobles/knowledgebase/blob/master/hpc-scripts/nemotron-training-breakthrough.md)
+**Dataset preparation pipeline for fine-tuning Nemotron-3-Nano on Alice's Wonderland puzzles.**
 
-Dual-purpose fine-tuning for:
+Repository: `alrobles/nemotron-eco-reasoner`
+HuggingFace: [`alrobles/ecocoder-nemotron-kaggle`](https://huggingface.co/datasets/alrobles/ecocoder-nemotron-kaggle)
 
-1. **Reasoning puzzles** — Kaggle [NVIDIA Nemotron Model Reasoning Challenge](https://www.kaggle.com/competitions/nvidia-nemotron-model-reasoning-challenge/) (deadline: June 15, 2026)
-2. **Ecological agent tasks** — ecoSeek scientific assistant (tool-calling, taxonomy, host-parasite extraction)
+---
 
-One model, two capabilities. Trained on a combined dataset: 50% Kaggle logic puzzles + 50% ecology synthetic data.
+## Quick Reference (for Devin / new contributors)
 
-## Architecture
+### The problem
 
-- **Base model:** Nemotron-3-Nano-30B-A3B-BF16 (30B total, ~3B active per token)
-- **Method:** Unsloth 4-bit QLoRA, rank 32, BF16 compute — the only approach that works
-- **MoE fix:** Custom monkey-patch for dtype-safe `index_add_` + top-k aggregation (Nemotron routes to 6 experts per token; vanilla bitsandbytes fails with shape/dtype mismatches)
-- **Hardware:** A100 40GB (single GPU) — 4-bit model fits in ~16-20GB VRAM
-- **Framework:** Unsloth 2026.6.1 + transformers 4.57 + TRL + PyTorch 2.5.1 (CUDA 12.4)
-- **Container:** Pre-built Apptainer SIF (`nemotron-cuda.sif`, 7GB) with isolated PYTHONUSERBASE for deps
+Kaggle evaluation has 9 puzzle categories. Some categories have terrible CoT traces (LLMs can't solve them in one pass). The old pipeline appended correct answers to wrong reasoning — this is harmful.
 
-## Quick Start
+### The solution
 
-```bash
-# Clone
-gh repo clone alrobles/nemotron-eco-reasoner
-cd nemotron-eco-reasoner
+1. **Classify** every puzzle into its 9 evaluation categories
+2. **Programmatic solver** for bit_manipulation (brute-force bitwise operations)
+3. **Answer-only** format for categories where LLM can't generate correct CoT (symbol-transformation puzzles)
+4. **Traditional cryptarithm CoT** from `cryptarithm_cot.jsonl` (250 high-quality traces)
+5. **Category-aware consolidation** with balancing
 
-# Prepare dataset (Kaggle CSV required in data/train.csv)
-python scripts/prepare_dataset.py --kaggle-csv data/train.csv --output data/combined_dataset.jsonl
+### Dataset files (use the latest)
 
-# Generate ecology dataset from PubMed papers
-python scripts/generate_eco_dataset.py --output data/eco_dataset.jsonl
-```
+| File | Traces | Status |
+|------|--------|--------|
+| `data/train_cot_unified_v5.jsonl` | 7,083 | **CURRENT** — solver + answer-only strategy |
+| `data/train_cot_unified.jsonl` | 7,076 | Original (DeepSeek CoT, no categories) |
 
-### Local training (reumanlab, RTX 2000 Ada)
+### Quick commands
 
 ```bash
-python scripts/train_m1_container.py \
-    --model /path/to/nemotron-model \
-    --data data/kaggle_5k_train.jsonl \
-    --output outputs/m1_run1 \
-    --max_steps 500
+# 1. Classify puzzles
+python3 scripts/classify_puzzles.py \
+    --input data/kaggle_puzzles_raw.jsonl \
+    --output data/kaggle_classified.jsonl
+
+# 2. Run bit manipulation solver (replaces noisy CoT with verified correct traces)
+python3 scripts/solve_bit_manipulation.py \
+    --input data/bit_manipulation_puzzles.jsonl \
+    --output /tmp/bit_solutions.jsonl
+
+# 3. Combine solver + original CoT for bit_manipulation
+python3 scripts/combine_bit.py
+
+# 4. Generate guess puzzles (synthetic from deduce)
+python3 scripts/generate_guess_puzzles.py
+
+# 5. Final consolidation
+python3 scripts/consolidate_final.py \
+    --classified data/kaggle_classified.jsonl \
+    --cot-file data/train_cot_unified.jsonl \
+    --cryptarithm-file data/cryptarithm_cot.jsonl \
+    --cryptarithm-guess-file data/cryptarithm_guess_puzzles.jsonl \
+    --equation-guess-file data/equation_numeric_guess_puzzles.jsonl \
+    --output data/train_cot_unified_v5.jsonl \
+    --balance
+
+# 6. Upload to HuggingFace
+export HF_TOKEN=$(cat ~/env/hf-token)
+hf upload alrobles/ecocoder-nemotron-kaggle \
+    data/train_cot_unified_v5.jsonl train_cot_unified_v5.jsonl \
+    --repo-type dataset
 ```
 
-### HPC training (KU CRC, MI210)
+---
 
-Pre-built Apptainer container with PyTorch 2.6.0 ROCm, transformers, peft, trl — zero setup. `mamba-ssm` installed at runtime (required for Nemotron hybrid architecture).
+## 9 Evaluation Categories
 
-```bash
-# Submit to cluster
-sbatch hpc/train_m1_mi210.slurm
+| # | Category | Weight | Eval Acc | Strategy | Train Traces |
+|---|----------|--------|----------|----------|-------------|
+| 1 | unit_conversion | 18.0% | 98.0% | CoT (91% match) | 817 |
+| 2 | bit_manipulation | 17.8% | 84.0% | **Solver** (35% match) | 822 |
+| 3 | cipher | 17.1% | 97.5% | CoT (72% match) | 831 |
+| 4 | gravity | 16.7% | 98.0% | CoT (99% match) | 850 |
+| 5 | numeral | 15.7% | 98.0% | CoT (100% match) | 847 |
+| 6 | cryptarithm_deduce | 7.5% | 18.3% | Mixed* | 667 |
+| 7 | equation_numeric_deduce | 5.1% | 87.5% | CoT (33% match) | 416 |
+| 8 | cryptarithm_guess | 1.5% | 71.4% | Answer-only | 417 |
+| 9 | equation_numeric_guess | 0.7% | 42.9% | Answer-only | 416 |
 
-# A100 fallback
-sbatch hpc/train_a100.slurm
+\* cryptarithm_deduce: 250 traditional cryptarithm CoT (verified correct) + 417 symbol-transformation answer-only
 
-# Multi-node scaling (3 nodes × 2 MI210s)
-sbatch hpc/train_multi_node.slurm
+---
+
+## Key Findings
+
+### 1. CoT auto-fix is HARMFUL
+
+Original pipeline: DeepSeek generates CoT → 97.6% wrong for cryptarithm_deduce → script appends `\nThe final answer is \boxed{correct}` at end.
+
+**Result**: Model learns to write 37+ steps of wrong reasoning + correct answer. This corrupts training.
+
+**Fix**: For categories where LLM can't generate correct CoT, use answer-only format (or programmatic solver).
+
+### 2. DeepSeek v4 Pro cannot solve these puzzle types
+
+Tried regenerating CoT with specialized prompts for:
+- **cryptarithm_deduce**: 0% match rate (symbol-transformation = program synthesis)
+- **bit_manipulation**: 0% match rate (105-step search, model gives up)
+
+These are inductive reasoning / search tasks. LLMs cannot do systematic search in a single forward pass.
+
+### 3. Programmatic solver works for bit_manipulation
+
+`scripts/solve_bit_manipulation.py` brute-forces ~30 bitwise operation types (shift, XOR, AND, OR, rotate, GF(2) linear transforms, 2-op combinations).
+
+```
+Result: 580/822 puzzles have a discoverable rule
+        → 266/822 correct (32.4%) — 3x better than DeepSeek (11.2%)
+        → 314/822 overfit (rule fits examples but fails on target)
+        → 242/822 no rule found (non-linear operations)
 ```
 
-## Scripts
+### 4. Symbol-transformation puzzles are program synthesis
 
-| Script | Purpose |
-|--------|---------|
-| `scripts/train_m1_container.py` | **Canonical** — DoRA training via Apptainer container |
-| `scripts/train_bf16_lora.py` | BF16 LoRA training (A100, no container needed) |
-| `scripts/prepare_dataset.py` | Generate combined Kaggle+ecology JSONL dataset |
-| `scripts/generate_eco_dataset.py` | PubMed-based ecological reasoning examples |
-| `scripts/cluster_api.py` | HTTP API for remote training orchestration |
-| `scripts/evaluate.py` | Dual-benchmark evaluation |
-| `scripts/submit_kaggle.py` | Package adapter for Kaggle submission |
+The cryptarithm_deduce puzzles are NOT substitution ciphers. They involve:
+- Unknown operators (`*`, `+`, `-`, `@`, `|`) with secret semantics
+- Expression evaluation over a large symbol alphabet
+- This is program synthesis over an unknown DSL — NP-hard in general
 
-## Project Structure
+**Current strategy**: 250 traditional cryptarithm CoT (verified correct) + 417 answer-only.
+
+---
+
+## Scripts Reference
+
+| Script | Purpose | Input | Output |
+|--------|---------|-------|--------|
+| `classify_puzzles.py` | Classify 5,000 puzzles into 9 categories | `kaggle_puzzles_raw.jsonl` | `kaggle_classified.jsonl` |
+| `solve_bit_manipulation.py` | **Solver**: brute-force bitwise operations | `bit_manipulation_puzzles.jsonl` | Solutions JSONL |
+| `consolidate_final.py` | **Final** consolidator with category strategy | Multiple sources | `train_cot_unified_v5.jsonl` |
+| `consolidate_dataset_v2.py` | Intermediate consolidator (deprecated by final) | — | — |
+| `regenerate_bit_cot.py` | DeepSeek bit CoT regeneration | — | **FAILED** (0% match) |
+| `regenerate_cryptarithm_cot.py` | DeepSeek cryptarithm CoT regeneration | — | **FAILED** (0% match) |
+| `generate_cot_traces.py` | Original DeepSeek CoT generation | Puzzles JSONL | CoT traces |
+| `prepare_dataset_kaggle.py` | Kaggle CSV → ShareGPT | `train.csv` | JSONL |
+| `submit_kaggle.py` | Package LoRA adapter for submission | Adapter checkpoint | `submission.zip` |
+| `train_unsloth.py` | Unsloth QLoRA training | Dataset JSONL | LoRA adapter |
+
+---
+
+## Data Files Reference
 
 ```
-nemotron-eco-reasoner/
-├── scripts/           # Training, dataset prep, eval, submission
-├── hpc/               # Active Slurm templates (3)
-│   └── archive/       # Deprecated templates (9, kept for reference)
-├── containers/        # Apptainer definition + docs
-├── data/              # Training JSONL datasets (gitignored)
-├── outputs/           # Checkpoints and adapters (gitignored)
-└── logs/              # Job output logs (gitignored)
+data/
+├── kaggle_puzzles_raw.jsonl              # 5,000 raw puzzles (prompt + answer)
+├── kaggle_classified.jsonl               # 5,000 puzzles with category labels
+├── bit_manipulation_puzzles.jsonl         # 822 bit manipulation puzzles
+├── cryptarithm_deduce_puzzles.jsonl       # 417 symbol-transformation puzzles
+├── cryptarithm_guess_puzzles.jsonl        # 417 synthetic (1-2 examples, from deduce)
+├── equation_numeric_guess_puzzles.jsonl   # 416 synthetic (1-2 examples)
+├── cryptarithm_cot.jsonl                  # 500 CoT traces (250 traditional cryptarithm)
+├── train_cot_unified.jsonl                # 7,076 original traces (DeepSeek CoT + ecology)
+├── train_cot_unified_v5.jsonl             # 🏆 FINAL: 7,083 traces, all 9 categories
+├── ecology_chat.jsonl                     # 2,076 ecology reasoning traces
+└── kaggle_5k_train.jsonl                 # Duplicate of puzzles_raw (legacy)
 ```
 
-## Dataset Composition
+---
 
-| Source | Examples | Description |
-|--------|----------|-------------|
-| Kaggle reasoning | ~15K | Logic puzzles (bit manipulation, algebra, truth tables) |
-| EcoAgent CoFID | ~5K | Host-parasite Q&A |
-| EcoAgent tool-calling | ~5K | Ecological tool selection and synthesis |
-| EcoAgent triplets | ~3K | Host-parasite relationship extraction |
-| EcoAgent taxonomy | ~2K | Taxonomic resolution |
-| PubMed ecology | var | Paper-based ecological reasoning |
-| **Total** | **~30K** | ShareGPT format |
+## CoT Quality by Category (v5 dataset)
 
-## Evaluation
+```
+Category                    Traces   CoT Verified   Format        Quality
+─────────────────────────────────────────────────────────────────────────
+numeral                       847     847 (100%)     CoT           🟢 Perfect
+gravity                       850     838 (99%)      CoT           🟢 Excellent
+unit_conversion               817     741 (91%)      CoT           🟢 Excellent
+cipher                        831     602 (72%)      CoT           🟢 Good
+bit_manipulation              822     287 (35%)      CoT           🟡 Improved (was 11%)
+equation_numeric_deduce       416     136 (33%)      CoT           🟡 Noisy
+cryptarithm_deduce            667     250 (trad)     CoT + answer  🔴 Mixed
+cryptarithm_guess             417     0              answer-only   🔴 Answer-only
+equation_numeric_guess        416     0              answer-only   🔴 Answer-only
+ecology                      1000     —              CoT           🟢 Ecology
+─────────────────────────────────────────────────────────────────────────
+TOTAL                        7083    3701 (63%)      —              —
+```
 
-Dual benchmark:
-- **Reasoning accuracy:** Puzzle answer match on Kaggle test split
-- **Ecology accuracy:** Tool-call accuracy, triplet extraction F1, abstract classification, taxonomy resolution, report quality
+---
+
+## Category Strategy Decision Tree
+
+```
+Puzzle category?
+├── gravity / numeral / unit_conversion / cipher
+│   → Keep existing CoT (high quality, >70% match rate)
+│
+├── bit_manipulation
+│   → Run solver (solve_bit_manipulation.py)
+│   → Use solver traces where correct (35% match)
+│   → Fall back to original CoT for the rest
+│
+├── equation_numeric_deduce
+│   → Keep existing CoT (33% match, best available)
+│
+├── cryptarithm_deduce
+│   → 250 traditional cryptarithm CoT (cryptarithm_cot.jsonl)
+│   → 417 symbol-transformation → answer-only
+│
+├── cryptarithm_guess / equation_numeric_guess
+│   → Generate synthetic puzzles (reduce examples from deduce variants)
+│   → answer-only format (LLM can't solve)
+│
+└── ecology
+    → Keep existing traces (high quality)
+```
+
+---
+
+## Environment
+
+- **DeepSeek API key**: `~/env/deepseek-token` (on reumanlab)
+- **HuggingFace token**: `~/env/hf-token` (local)
+- **Python**: 3.12+ with `httpx`, `pandas` (for dataset prep)
+- **HF CLI**: `hf` (not deprecated `huggingface-cli`)
+
+---
 
 ## License
 
