@@ -149,6 +149,7 @@ batch_steps = min(STEPS_PER_JOB, TARGET_TOTAL - global_step)
 target_step = global_step + batch_steps
 
 from trl import SFTTrainer,SFTConfig
+from transformers import TrainerCallback
 USE_BF16=bf16_ok
 trainer=SFTTrainer(model=model,args=SFTConfig(
     output_dir=OUT_PATH,max_steps=target_step,per_device_train_batch_size=1,
@@ -169,7 +170,7 @@ import random as _random
 _eval_ds = None
 _eval_samples = None
 
-class EvalCallback:
+class EvalCallback(TrainerCallback):
     def __init__(self):
         global _eval_ds, _eval_samples
         if os.path.exists(EVAL_DATA):
