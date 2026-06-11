@@ -44,7 +44,40 @@ def main():
 
     from unsloth import FastLanguageModel
     model, tok = FastLanguageModel.from_pretrained(
-        model_path, max_seq_length=args.seq_len, load_in_4bit=True, trust_remote_code=True)
+        model_path, max_seq_length=args.seq_len, load_in_4bit=True, trust_remote_code=True,
+        device_map={"": 0})
+
+    # Same dense per-expert MoE dispatch as training (hpc/nem_chained.slurm):
+    # the stock NemotronH dispatch hits a bf16/fp32 index_add_ dtype mismatch
+    # when LoRA adapters are active.
+    import types as _types
+    patched = 0
+    for module in model.modules():
+        if not hasattr(module, "moe") or not hasattr(module, "experts"):
+            continue
+        if not callable(module.moe):
+            continue
+
+        def mp(mod):
+            def pm(_self, h, ti, tw):
+                h = h.view(-1, h.size(-1)); ft = ti.view(-1)
+                h = h.repeat_interleave(ti.shape[-1], dim=0)
+                fh = torch.zeros_like(h); dt = fh.dtype
+                for i, el in enumerate(mod.experts):
+                    m = (ft == i).nonzero(as_tuple=True)[0]
+                    if m.numel() == 0:
+                        continue
+                    eh = h[m]; eo = el(eh); w = tw.view(-1)[m]; wo = eo * w.unsqueeze(-1)
+                    if wo.dtype != dt:
+                        wo = wo.to(dt)
+                    fh.index_add_(0, m, wo)
+                tk = ti.shape[-1]
+                return fh.view(-1, tk, fh.size(-1)).sum(dim=1)
+            return pm
+
+        module.moe = _types.MethodType(mp(module), module); patched += 1
+    print(f"MoE patched: {patched} layers", flush=True)
+
     model.load_adapter(args.adapter)
     FastLanguageModel.for_inference(model)
 
