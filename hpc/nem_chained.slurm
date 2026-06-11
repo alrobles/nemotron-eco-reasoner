@@ -95,8 +95,11 @@ def _sigusr1(signum,frame):
 signal.signal(signal.SIGUSR1,_sigusr1)
 
 print("Loading model...")
+# Slurm may assign a non-zero physical GPU (CUDA_VISIBLE_DEVICES="1"); torch
+# renumbers visible devices from 0, so pin the device_map to ordinal 0 to avoid
+# "invalid device ordinal" in transformers' caching_allocator_warmup.
 from unsloth import FastLanguageModel
-model,tok=FastLanguageModel.from_pretrained(MODEL_PATH,max_seq_length=SEQ_LEN,load_in_4bit=True,trust_remote_code=True)
+model,tok=FastLanguageModel.from_pretrained(MODEL_PATH,max_seq_length=SEQ_LEN,load_in_4bit=True,trust_remote_code=True,device_map={"":0})
 
 import types as _types
 patched=0
