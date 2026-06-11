@@ -5,7 +5,10 @@
 #SBATCH --job-name=nem-eval
 #SBATCH --partition=sixhour
 #SBATCH --time=05:50:00
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:l40:1
+# NOTE: generic --gres=gpu:1 can land on AMD MI210 nodes, where the CUDA
+# container has no usable accelerator. Default to L40 (48GB, enough for 4-bit
+# inference); override with sbatch --gres=gpu:<type>:1 for other NVIDIA GPUs.
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=2
 #SBATCH --output=/home/a474r867/scratch/nem_eval_%j.out
