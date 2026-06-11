@@ -62,6 +62,8 @@ apptainer exec --nv --bind "/dev/shm,/tmp" \
     --env MODEL_PATH=$M --env DATA_PATH=$D --env OUT_PATH=$O \
     --env JOBID=$JOBID --env TRITON_CACHE_DIR=/tmp/triton_$SLURM_JOB_ID \
     --env TARGET_TOTAL=$TARGET_TOTAL --env STEPS_PER_JOB=$STEPS_PER_JOB \
+    --env SEQ_LEN=${SEQ_LEN:-2048} --env RANK=${RANK:-32} --env GRAD_ACCUM=${GRAD_ACCUM:-8} \
+    --env LR=${LR:-1e-4} --env LORA_ALPHA=${LORA_ALPHA:-${RANK:-32}} --env LR_SCHED=${LR_SCHED:-constant_with_warmup} --env TAG=${TAG:-BEAST} \
     --env TEMPLATE_PATH=$TEMPLATE_PATH \
     $C env PYTHONUNBUFFERED=1 python3 -u << 'PYEOF'
 import os, re, sys, signal, types, torch, time, json, glob, subprocess
@@ -79,8 +81,11 @@ vram_gb=torch.cuda.get_device_properties(0).total_memory/1e9
 bf16_ok=torch.cuda.is_bf16_supported()
 cc=(torch.cuda.get_device_capability(0)[0]*10+torch.cuda.get_device_capability(0)[1])/10
 
-SEQ_LEN=2048; RANK=32; GRAD_ACCUM=8; TAG="BEAST"
-print(f"GPU: {gpu_name} ({vram_gb:.1f}GB) CC={cc} bf16={bf16_ok} | seq={SEQ_LEN} rank={RANK} [{TAG}]")
+SEQ_LEN=int(os.environ.get("SEQ_LEN","2048")); RANK=int(os.environ.get("RANK","32"))
+GRAD_ACCUM=int(os.environ.get("GRAD_ACCUM","8")); TAG=os.environ.get("TAG","BEAST")
+LR=float(os.environ.get("LR","1e-4")); LORA_ALPHA=int(os.environ.get("LORA_ALPHA",str(RANK)))
+LR_SCHED=os.environ.get("LR_SCHED","constant_with_warmup")
+print(f"GPU: {gpu_name} ({vram_gb:.1f}GB) CC={cc} bf16={bf16_ok} | seq={SEQ_LEN} rank={RANK} lr={LR} alpha={LORA_ALPHA} sched={LR_SCHED} [{TAG}]")
 
 _trainer=None
 def _sigusr1(signum,frame):
@@ -114,7 +119,7 @@ for module in model.modules():
     module.moe=_types.MethodType(mp(module),module); patched+=1
 print(f"MoE patched: {patched} layers")
 
-model=FastLanguageModel.get_peft_model(model,r=RANK,lora_alpha=RANK,
+model=FastLanguageModel.get_peft_model(model,r=RANK,lora_alpha=LORA_ALPHA,
     target_modules=['q_proj','k_proj','v_proj','o_proj','in_proj','out_proj','up_proj','down_proj'],
     use_gradient_checkpointing='unsloth')
 model.print_trainable_parameters()
@@ -153,8 +158,8 @@ from transformers import TrainerCallback
 USE_BF16=bf16_ok
 trainer=SFTTrainer(model=model,args=SFTConfig(
     output_dir=OUT_PATH,max_steps=target_step,per_device_train_batch_size=1,
-    gradient_accumulation_steps=GRAD_ACCUM,learning_rate=1e-4,max_seq_length=SEQ_LEN,
-    warmup_steps=min(30,target_step//3),lr_scheduler_type="constant_with_warmup",
+    gradient_accumulation_steps=GRAD_ACCUM,learning_rate=LR,max_seq_length=SEQ_LEN,
+    warmup_steps=min(30,target_step//3),lr_scheduler_type=LR_SCHED,
     logging_steps=10,save_steps=50,save_total_limit=10,
     bf16=USE_BF16,fp16=not USE_BF16,
     remove_unused_columns=False,report_to="none",
