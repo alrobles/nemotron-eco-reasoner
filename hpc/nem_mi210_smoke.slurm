@@ -7,8 +7,8 @@
 #SBATCH --partition=sixhour
 #SBATCH --time=03:00:00
 #SBATCH --gres=gpu:mi210:2
-#SBATCH --mem=160G
-#SBATCH --cpus-per-task=8
+#SBATCH --mem=96G
+#SBATCH --cpus-per-task=6
 #SBATCH --output=/home/a474r867/scratch/nem_mi210_smoke_%j.out
 #SBATCH --error=/home/a474r867/scratch/nem_mi210_smoke_%j.err
 
@@ -31,7 +31,41 @@ apptainer exec --rocm --bind "/dev/shm,/tmp,$M,$R" \
     --env DATA="$DATA" --env OUT="$OUT" --env M="$M" \
     --env MAX_STEPS=$MAX_STEPS --env SEQ_LEN=$SEQ_LEN \
     $C python3 - <<'PYEOF'
-import os, time, torch
+import os, time, glob, shutil, torch
+
+# The stock modeling_nemotron_h.py hard-raises if mamba_ssm is missing, even
+# though every kernel it needs has a torch fallback except rmsnorm_fn. Patch
+# the snapshot to provide a pure-torch rmsnorm_fn so the ROCm container
+# (no mamba_ssm) can load the model. No-op when mamba_ssm is importable.
+MPATH = os.path.join(os.environ["M"], "modeling_nemotron_h.py")
+OLD = '''except ImportError:
+    raise ImportError("mamba-ssm is required by the Mamba model but cannot be imported")'''
+NEW = '''except ImportError:
+    def rmsnorm_fn(x, weight, bias=None, z=None, eps=1e-5, group_size=None, norm_before_gate=False):
+        dt = x.dtype
+        x = x.float()
+        if z is not None and not norm_before_gate:
+            x = x * torch.nn.functional.silu(z.float())
+        if group_size is not None and group_size != x.shape[-1]:
+            s = x.shape
+            xg = x.view(*s[:-1], s[-1] // group_size, group_size)
+            xg = xg * torch.rsqrt(xg.pow(2).mean(-1, keepdim=True) + eps)
+            x = xg.view(s)
+        else:
+            x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
+        out = x * weight.float()
+        if bias is not None:
+            out = out + bias.float()
+        if z is not None and norm_before_gate:
+            out = out * torch.nn.functional.silu(z.float())
+        return out.to(dt)'''
+src = open(MPATH).read()
+if OLD in src:
+    open(MPATH, "w").write(src.replace(OLD, NEW))
+    print("patched modeling_nemotron_h.py with torch rmsnorm_fn fallback")
+for d in glob.glob(os.path.expanduser("~/.cache/huggingface/modules/transformers_modules/cbd3fa9f*")):
+    shutil.rmtree(d, ignore_errors=True)  # force re-copy of patched module
+
 print(f"torch {torch.__version__} | GPUs: {torch.cuda.device_count()}")
 for i in range(torch.cuda.device_count()):
     p = torch.cuda.get_device_properties(i)
