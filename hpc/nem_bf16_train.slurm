@@ -3,6 +3,8 @@
 # no 4-bit quantization (no unsloth/bitsandbytes): pure transformers+peft+trl,
 # same recipe validated on 2x MI210 (hpc/nem_mi210_train.slurm). The 60GB bf16
 # weights + LoRA + gradient checkpointing fit in 96GB with packing=False.
+# NOTE: precompiled mamba_ssm/causal_conv1d wheels lack Blackwell sm_100+ kernels,
+# so we skip them entirely and use the same pure-torch rmsnorm_fn fallback as MI210.
 # Chained: STEPS_PER_JOB per job + auto-resubmit to TARGET_TOTAL.
 # Usage:
 #   sbatch --export=ALL,DATA_PATH=.../train_deterministic_v9.jsonl,OUT_PATH=.../outputs/bf16_v9 hpc/nem_bf16_train.slurm
@@ -43,11 +45,13 @@ set -uo pipefail
 pip install --user --no-cache-dir -q --no-deps "transformers==4.57.6" "tokenizers==0.22.2" 2>&1 | tail -1 || true
 pip install --user --no-cache-dir -q --no-deps "datasets==4.3.0" "trl==0.24.0" "peft==0.18.0" 2>&1 | tail -1 || true
 pip install --user --no-cache-dir -q --no-deps einops 2>&1 | tail -1 || { echo "FATAL: einops"; exit 1; }
-WHEEL_DIR=/home/a474r867/scratch/wheels
-pip install --user --no-deps $WHEEL_DIR/causal_conv1d-1.4.0-cp312-cp312-linux_x86_64.whl 2>&1 | tail -1
-pip install --user --no-deps $WHEEL_DIR/mamba_ssm-2.2.4-cp312-cp312-linux_x86_64.whl 2>&1 | tail -1
+# Skip mamba_ssm & causal_conv1d wheels — their CUDA kernels lack Blackwell
+# (sm_100+) support. The model code falls back to pure torch when these are
+# absent (rmsnorm_fn patched in the snapshot, same as MI210 path).
 VIRTUAL_ENV=${PYTHONUSERBASE:-$HOME/.local}
 rm -rf $VIRTUAL_ENV/lib/python3*/site-packages/torch* $VIRTUAL_ENV/lib/python3*/site-packages/triton* $VIRTUAL_ENV/lib/python3*/site-packages/nvidia* 2>/dev/null
+# Also purge any system-level mamba_ssm/causal_conv1d so they don't get imported
+rm -rf $VIRTUAL_ENV/lib/python3*/site-packages/mamba_ssm* $VIRTUAL_ENV/lib/python3*/site-packages/causal_conv1d* 2>/dev/null
 python3 -c 'import trl, peft, transformers; print("trl", trl.__version__, "| peft", peft.__version__, "| transformers", transformers.__version__)'
 INSTALL_EOF
 [ $? -ne 0 ] && { echo "INSTALL FAILED"; exit 1; }
@@ -61,7 +65,38 @@ apptainer exec --nv --bind "/dev/shm,/tmp,$M,$R" \
     --env TARGET_TOTAL=$TARGET_TOTAL --env STEPS_PER_JOB=$STEPS_PER_JOB \
     --env SEQ_LEN=$SEQ_LEN --env GRAD_ACCUM=$GRAD_ACCUM --env LR=$LR \
     $C python3 - <<'PYEOF'
-import os, time, glob, json, torch
+import os, time, glob, json, shutil, torch
+
+# Torch rmsnorm_fn fallback patch (same as MI210 path) — the Blackwell PRO6000
+# can't use the precompiled mamba_ssm wheels (no sm_100+ kernels).
+M_PATH = os.path.join(os.environ["M"], "modeling_nemotron_h.py")
+OLD = '''except ImportError:
+    raise ImportError("mamba-ssm is required by the Mamba model but cannot be imported")'''
+NEW = '''except ImportError:
+    def rmsnorm_fn(x, weight, bias=None, z=None, eps=1e-5, group_size=None, norm_before_gate=False):
+        dt = x.dtype
+        x = x.float()
+        if z is not None and not norm_before_gate:
+            x = x * torch.nn.functional.silu(z.float())
+        if group_size is not None and group_size != x.shape[-1]:
+            s = x.shape
+            xg = x.view(*s[:-1], s[-1] // group_size, group_size)
+            xg = xg * torch.rsqrt(xg.pow(2).mean(-1, keepdim=True) + eps)
+            x = xg.view(s)
+        else:
+            x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
+        out = x * weight.float()
+        if bias is not None:
+            out = out + bias.float()
+        if z is not None and norm_before_gate:
+            out = out * torch.nn.functional.silu(z.float())
+        return out.to(dt)'''
+src = open(M_PATH).read()
+if OLD in src:
+    open(M_PATH, "w").write(src.replace(OLD, NEW))
+    print("patched modeling_nemotron_h.py with torch rmsnorm_fn fallback")
+for d in glob.glob(os.path.expanduser("~/.cache/huggingface/modules/transformers_modules/cbd3fa9f*")):
+    shutil.rmtree(d, ignore_errors=True)
 
 M = os.environ["M"]; DATA = os.environ["DATA"]; OUT = os.environ["OUT"]
 JOBID = os.environ["JOBID"]
