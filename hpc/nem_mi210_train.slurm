@@ -32,6 +32,7 @@ echo "=== MI210 TRAIN job=$JOBID $(date) data=$DATA out=$OUT target=$TARGET_TOTA
 
 apptainer exec --rocm --bind "/dev/shm,/tmp,$M,$R" \
     --env PYTHONUNBUFFERED=1 --env TORCH_COMPILE_DISABLE=1 \
+    --env PYTORCH_HIP_ALLOC_CONF=expandable_segments:True \
     --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
     --env DATA="$DATA" --env OUT="$OUT" --env M="$M" --env JOBID=$JOBID \
     --env TARGET_TOTAL=$TARGET_TOTAL --env STEPS_PER_JOB=$STEPS_PER_JOB \
@@ -85,8 +86,11 @@ tok = AutoTokenizer.from_pretrained(M, trust_remote_code=True)
 if tok.pad_token is None: tok.pad_token = tok.eos_token
 
 t0 = time.time()
+# Cap per-GPU weights so backward activations (which land on the same GPUs as
+# their layers) have headroom; device_map="auto" otherwise fills GPU0 to ~50GB.
 model = AutoModelForCausalLM.from_pretrained(
-    M, trust_remote_code=True, dtype=torch.bfloat16, device_map="auto")
+    M, trust_remote_code=True, dtype=torch.bfloat16, device_map="auto",
+    max_memory={0: "46GiB", 1: "46GiB"})
 print(f"MODEL LOADED in {time.time()-t0:.0f}s")
 
 from peft import LoraConfig
@@ -117,7 +121,7 @@ from trl import SFTTrainer, SFTConfig
 cfg = SFTConfig(output_dir=OUT, max_steps=target_step, per_device_train_batch_size=1,
                 gradient_accumulation_steps=GRAD_ACCUM, learning_rate=LR, logging_steps=10,
                 bf16=True, gradient_checkpointing=True, optim="adamw_torch",
-                max_length=SEQ_LEN, dataset_text_field="text", packing=True,
+                max_length=SEQ_LEN, dataset_text_field="text", packing=False,
                 warmup_steps=min(30, target_step//3), lr_scheduler_type="constant_with_warmup",
                 save_steps=50, save_total_limit=10, report_to="none")
 trainer = SFTTrainer(model=model, args=cfg, train_dataset=ds,
