@@ -82,19 +82,22 @@ def patch_moe(model):
     print(f"MoE patched: {patched} layers", flush=True)
 
 
-SYS_PROMPT = (
+TRAIN_SYS = "You are a helpful assistant that solves puzzles step by step."
+EXPERT_SYS = (
     "You are an expert puzzle solver. Think step by step and place "
     "your final answer inside \\boxed{}."
 )
 
 
-def build_msgs(prompt):
-    return [
-        {"role": "system", "content": SYS_PROMPT},
-        {
-            "role": "user",
-            "content": prompt + "\n\nPlease put your final answer inside \\boxed{}.",
-        },
+def build_msgs(prompt, style):
+    if style == "train":  # exact training distribution
+        return [
+            {"role": "system", "content": TRAIN_SYS},
+            {"role": "user", "content": prompt},
+        ]
+    return [  # the old eval prompt (off-distribution)
+        {"role": "system", "content": EXPERT_SYS},
+        {"role": "user", "content": prompt + "\n\nPlease put your final answer inside \\boxed{}."},
     ]
 
 
@@ -103,6 +106,7 @@ def main():
     ap.add_argument("--adapter", required=True)
     ap.add_argument("--data", default="data/kaggle_classified.jsonl")
     ap.add_argument("--cats", default="numeral,cipher")
+    ap.add_argument("--styles", default="train,expert", help="prompt styles to A/B")
     ap.add_argument("--max-new-tokens", type=int, default=6000)
     ap.add_argument("--seq-len", type=int, default=2048)
     args = ap.parse_args()
@@ -128,15 +132,16 @@ def main():
     cache_cls = get_cache_cls()
     print(f"KV cache class: {cache_cls.__name__ if cache_cls else 'auto'}", flush=True)
 
-    # Show what the chat template actually produces (reasoning priming?).
-    sample_ids = tok.apply_chat_template(
-        [build_msgs("PROMPT_PLACEHOLDER")],
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    print("===== CHAT TEMPLATE RENDER =====", flush=True)
-    print(repr(sample_ids)[:1500], flush=True)
-    print("===== /CHAT TEMPLATE =====", flush=True)
+    for style in args.styles.split(","):
+        style = style.strip()
+        sample_ids = tok.apply_chat_template(
+            [build_msgs("PROMPT_PLACEHOLDER", style)],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        print(f"===== CHAT TEMPLATE RENDER (style={style}) =====", flush=True)
+        print(repr(sample_ids)[:1500], flush=True)
+        print("===== /CHAT TEMPLATE =====", flush=True)
 
     by_cat = defaultdict(list)
     with open(args.data) as f:
@@ -150,48 +155,52 @@ def main():
             print(f"[{cat}] no examples", flush=True)
             continue
         r = by_cat[cat][0]
-        enc = tok.apply_chat_template(
-            [build_msgs(r["prompt"])],
-            tokenize=True,
-            add_generation_prompt=True,
-            padding=True,
-            return_tensors="pt",
-            return_dict=True,
-        ).to(model.device)
-        plen = enc["input_ids"].shape[1]
-        cache = make_cache(cache_cls, model, 1)
-        gkw = dict(
-            max_new_tokens=args.max_new_tokens,
-            do_sample=False,
-            pad_token_id=tok.pad_token_id,
-            eos_token_id=tok.eos_token_id,
-            use_cache=True,
-        )
-        if cache is not None:
-            gkw["past_key_values"] = cache
-        t0 = time.time()
-        with torch.no_grad():
-            out = model.generate(
-                input_ids=enc["input_ids"], attention_mask=enc["attention_mask"], **gkw
+        for style in args.styles.split(","):
+            style = style.strip()
+            enc = tok.apply_chat_template(
+                [build_msgs(r["prompt"], style)],
+                tokenize=True,
+                add_generation_prompt=True,
+                padding=True,
+                return_tensors="pt",
+                return_dict=True,
+            ).to(model.device)
+            plen = enc["input_ids"].shape[1]
+            cache = make_cache(cache_cls, model, 1)
+            gkw = dict(
+                max_new_tokens=args.max_new_tokens,
+                do_sample=False,
+                pad_token_id=tok.pad_token_id,
+                eos_token_id=tok.eos_token_id,
+                use_cache=True,
             )
-        dt = time.time() - t0
-        gen_ids = out[0][plen:]
-        n_gen = int(gen_ids.shape[0])
-        raw = tok.decode(gen_ids, skip_special_tokens=False)
-        clean = tok.decode(gen_ids, skip_special_tokens=True)
-        boxed = re.findall(r"\\boxed\{([^}]*)\}", clean)
-        print(f"\n########## CATEGORY={cat} ##########", flush=True)
-        print(
-            f"prompt_tokens={plen} gen_tokens={n_gen} hit_cap={n_gen>=args.max_new_tokens} "
-            f"gen_s={dt:.1f} has_think_close={'</think>' in raw} "
-            f"n_boxed={len(boxed)} gold={r.get('answer')!r}",
-            flush=True,
-        )
-        print("----- RAW HEAD (first 600 chars) -----", flush=True)
-        print(raw[:600], flush=True)
-        print("----- RAW TAIL (last 1200 chars) -----", flush=True)
-        print(raw[-1200:], flush=True)
-        print("########## /END ##########\n", flush=True)
+            if cache is not None:
+                gkw["past_key_values"] = cache
+            t0 = time.time()
+            with torch.no_grad():
+                out = model.generate(
+                    input_ids=enc["input_ids"],
+                    attention_mask=enc["attention_mask"],
+                    **gkw,
+                )
+            dt = time.time() - t0
+            gen_ids = out[0][plen:]
+            n_gen = int(gen_ids.shape[0])
+            raw = tok.decode(gen_ids, skip_special_tokens=False)
+            clean = tok.decode(gen_ids, skip_special_tokens=True)
+            boxed = re.findall(r"\\boxed\{([^}]*)\}", clean)
+            print(f"\n########## CATEGORY={cat} STYLE={style} ##########", flush=True)
+            print(
+                f"prompt_tokens={plen} gen_tokens={n_gen} "
+                f"hit_cap={n_gen >= args.max_new_tokens} gen_s={dt:.1f} "
+                f"has_think_close={'</think>' in raw} "
+                f"n_boxed={len(boxed)} pred={boxed[-1] if boxed else None!r} "
+                f"gold={r.get('answer')!r}",
+                flush=True,
+            )
+            print("----- RAW TAIL (last 800 chars) -----", flush=True)
+            print(raw[-800:], flush=True)
+            print("########## /END ##########\n", flush=True)
 
 
 if __name__ == "__main__":
