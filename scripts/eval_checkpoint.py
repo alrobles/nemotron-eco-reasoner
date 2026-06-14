@@ -50,6 +50,28 @@ def get_cache_cls():
     return None
 
 
+def make_cache(cache_cls, model, batch_size):
+    """Build a hybrid Mamba/attention KV cache sized for this batch. On this stack
+    the class requires (config, batch_size); we also pass the model's float dtype
+    and device so the Mamba conv/ssm states line up with the hidden states. Returns
+    None if it cannot be built, in which case generate() builds its own cache from
+    use_cache=True."""
+    if cache_cls is None:
+        return None
+    fp = next((p for p in model.parameters() if p.is_floating_point()), None)
+    dtype = fp.dtype if fp is not None else torch.bfloat16
+    device = fp.device if fp is not None else getattr(model, "device", "cuda")
+    for args, kwargs in (
+        ((model.config, batch_size), {"dtype": dtype, "device": device}),
+        ((model.config, batch_size), {}),
+    ):
+        try:
+            return cache_cls(*args, **kwargs)
+        except TypeError:
+            continue
+    return None
+
+
 def patch_moe(model):
     """Same dense per-expert MoE dispatch as training (hpc/nem_chained.slurm):
     the stock NemotronH dispatch hits a bf16/fp32 index_add_ dtype mismatch when
@@ -123,8 +145,9 @@ def generate_batch(model, tok, cache_cls, prompts, max_new_tokens):
         eos_token_id=tok.eos_token_id,
         use_cache=True,
     )
-    if cache_cls is not None:
-        gen_kwargs["past_key_values"] = cache_cls()
+    cache = make_cache(cache_cls, model, enc["input_ids"].shape[0])
+    if cache is not None:
+        gen_kwargs["past_key_values"] = cache
     with torch.no_grad():
         out = model.generate(
             input_ids=enc["input_ids"],
