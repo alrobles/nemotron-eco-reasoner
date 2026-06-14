@@ -46,16 +46,15 @@ The three hard ones are attacked with deterministic solvers that fit the puzzle'
 
 ```
 data/        canonical datasets (v8 record, v9 gravity source, v14, v15) + kaggle_classified (5k ground truth)
+  archive/     superseded datasets (older versions + intermediates) — kept for history
 scripts/     dataset builders, per-category solvers, classifier, eval, Kaggle packaging
-  archive/     superseded one-offs (kept for history)
-hpc/         Slurm launchers + trainers for the KU HPC cluster
-  archive/     superseded Slurm scripts
+  archive/     superseded one-offs (old builders/solvers/trainers)
+hpc/         Slurm launchers + trainers for the KU HPC cluster (tied + MI210 + eval) + container defs
+  archive/     superseded Slurm scripts + configs
 docs/        runbooks, milestones, design notes
   archive/     stale handoffs
-containers/  Apptainer/Singularity definition files
-cloud/       portable single-command cloud training
 monitor/     cluster monitoring helper
-notebooks/   portable QLoRA notebook
+archive/     superseded subtrees kept for history (cloud/, containers/, notebooks/)
 ```
 
 ### Key scripts
