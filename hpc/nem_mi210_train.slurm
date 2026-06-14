@@ -25,6 +25,8 @@ STEPS_PER_JOB=${STEPS_PER_JOB:-200}
 SEQ_LEN=${SEQ_LEN:-2048}
 GRAD_ACCUM=${GRAD_ACCUM:-4}
 LR=${LR:-1e-4}
+LORA_ALPHA=${LORA_ALPHA:-64}
+SEED=${SEED:-42}
 JOBID=${SLURM_JOB_ID:-$$}
 
 mkdir -p "$OUT"
@@ -37,6 +39,7 @@ apptainer exec --rocm --bind "/dev/shm,/tmp,$M,$R" \
     --env DATA="$DATA" --env OUT="$OUT" --env M="$M" --env JOBID=$JOBID \
     --env TARGET_TOTAL=$TARGET_TOTAL --env STEPS_PER_JOB=$STEPS_PER_JOB \
     --env SEQ_LEN=$SEQ_LEN --env GRAD_ACCUM=$GRAD_ACCUM --env LR=$LR \
+    --env LORA_ALPHA=$LORA_ALPHA --env SEED=$SEED \
     $C python3 - <<'PYEOF'
 import os, time, glob, json, shutil, torch
 
@@ -76,6 +79,10 @@ JOBID = os.environ["JOBID"]
 TARGET_TOTAL = int(os.environ["TARGET_TOTAL"]); STEPS_PER_JOB = int(os.environ["STEPS_PER_JOB"])
 SEQ_LEN = int(os.environ["SEQ_LEN"]); GRAD_ACCUM = int(os.environ["GRAD_ACCUM"])
 LR = float(os.environ["LR"])
+LORA_ALPHA = int(os.environ.get("LORA_ALPHA", "64"))
+SEED = int(os.environ.get("SEED", "42"))
+from transformers import set_seed
+set_seed(SEED)
 
 print(f"torch {torch.__version__} | GPUs: {torch.cuda.device_count()}")
 for i in range(torch.cuda.device_count()):
@@ -97,7 +104,7 @@ from peft import LoraConfig
 target = sorted({n.split(".")[-1] for n, m in model.named_modules()
                  if isinstance(m, torch.nn.Linear)} &
                 {"q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj","in_proj","out_proj"})
-peft_config = LoraConfig(r=32, lora_alpha=64, target_modules=target,
+peft_config = LoraConfig(r=32, lora_alpha=LORA_ALPHA, target_modules=target,
                          lora_dropout=0.05, bias="none", task_type="CAUSAL_LM")
 
 ckpts = sorted(glob.glob(os.path.join(OUT, "checkpoint-*", "trainer_state.json")), key=os.path.getmtime)
@@ -123,7 +130,7 @@ cfg = SFTConfig(output_dir=OUT, max_steps=target_step, per_device_train_batch_si
                 bf16=True, gradient_checkpointing=True, optim="adamw_torch",
                 max_length=SEQ_LEN, dataset_text_field="text", packing=False,
                 warmup_steps=min(30, target_step//3), lr_scheduler_type="constant_with_warmup",
-                save_steps=50, save_total_limit=10, report_to="none")
+                save_steps=50, save_total_limit=10, report_to="none", seed=SEED)
 trainer = SFTTrainer(model=model, args=cfg, train_dataset=ds,
                      processing_class=tok, peft_config=peft_config)
 print(f"TRAINING [MI210]: step {global_step} -> {target_step} (target={TARGET_TOTAL})")
@@ -146,7 +153,7 @@ if [ $PY_EXIT -eq 0 ]; then
     if [ -n "$NEED" ]; then
         TARGET_TOTAL_VAL=$(echo "$NEED" | grep -oP 'target_total=\K[0-9]+')
         echo "→ AUTO-RESUBMIT"
-        NEW_JID=$(sbatch --export=ALL,TARGET_TOTAL=${TARGET_TOTAL_VAL},STEPS_PER_JOB=${STEPS_PER_JOB},DATA_PATH=${DATA},OUT_PATH=${OUT} ${TEMPLATE_PATH} 2>/dev/null | grep -oP '\d+')
+        NEW_JID=$(sbatch --export=ALL,TARGET_TOTAL=${TARGET_TOTAL_VAL},STEPS_PER_JOB=${STEPS_PER_JOB},DATA_PATH=${DATA},OUT_PATH=${OUT},LR=${LR},SEQ_LEN=${SEQ_LEN},GRAD_ACCUM=${GRAD_ACCUM},LORA_ALPHA=${LORA_ALPHA},SEED=${SEED} ${TEMPLATE_PATH} 2>/dev/null | grep -oP '\d+')
         echo "→ RESUBMITTED: job ${NEW_JID}"
     fi
 fi
