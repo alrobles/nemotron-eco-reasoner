@@ -165,7 +165,7 @@ def main():
     )
     ap.add_argument("--data", default="data/kaggle_classified.jsonl")
     ap.add_argument("--n-per-cat", type=int, default=8)
-    ap.add_argument("--max-new-tokens", type=int, default=1024)
+    ap.add_argument("--max-new-tokens", type=int, default=4096)
     ap.add_argument("--seq-len", type=int, default=2048)
     ap.add_argument(
         "--batch-size",
