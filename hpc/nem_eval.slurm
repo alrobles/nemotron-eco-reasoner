@@ -29,7 +29,10 @@ M=/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-
 P=/tmp/pip_$SLURM_JOB_ID
 ADAPTER=${ADAPTER:?set ADAPTER=/path/to/checkpoint-N}
 N_PER_CAT=${N_PER_CAT:-8}
-MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-1024}
+# NemotronH is a reasoning model: it emits a long <think>...</think> block before
+# \boxed{}. 1024 tokens truncates mid-reasoning so \boxed{} is never produced and
+# every category scores 0.0. 4096 lets the reasoning finish before the answer.
+MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-4096}
 rm -rf $P 2>/dev/null; mkdir -p $P
 
 echo "=== EVAL job=$SLURM_JOB_ID $(date) adapter=$ADAPTER n_per_cat=$N_PER_CAT ==="
