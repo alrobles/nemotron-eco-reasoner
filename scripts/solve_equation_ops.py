@@ -105,6 +105,24 @@ def apply_cand(cand, A, B):
     return r
 
 
+# Some puzzles decorate the result with the operator symbol itself (prefix or
+# suffix), e.g. f(53,84) under '%' shown as '%31'. This is a pure output-format
+# choice that is consistent within a puzzle; we fit it as an extra dimension on
+# top of the base operator family (kept out of CANDS so cryptarithm is unaffected).
+DECORS = ('none', 'pre', 'suf')
+
+
+def apply_cand_dec(cand, decor, sym, A, B):
+    r = apply_cand(cand, A, B)
+    if r is None:
+        return None
+    if decor == 'pre':
+        return sym + r
+    if decor == 'suf':
+        return r + sym
+    return r
+
+
 def cand_str(cand, sym=''):
     ta, tb, bn, outer = cand
     wa = "rev(A)" if ta == 'rev' else "A"
@@ -115,9 +133,28 @@ def cand_str(cand, sym=''):
     return expr
 
 
+def _split_cand(cand):
+    """Accept either a base 4-tuple operator family or a (base, decor) pair."""
+    if len(cand) == 2 and isinstance(cand[0], tuple):
+        return cand[0], cand[1]
+    return cand, 'none'
+
+
+def cand_str_dec(cand, sym=''):
+    base, decor = _split_cand(cand)
+    expr = cand_str(base, sym)
+    if decor == 'pre':
+        expr = f"'{sym}' ++ {expr}"
+    elif decor == 'suf':
+        expr = f"{expr} ++ '{sym}'"
+    return expr
+
+
 def parse(prompt):
     exs = []
-    for m in re.finditer(r'(\d+)\s*(\D)\s*(\d+)\s*=\s*(-?\d+)', prompt):
+    # capture the full RHS token (a result may carry the operator symbol as a
+    # prefix/suffix decoration, e.g. '%31'); the query line has no '=' result.
+    for m in re.finditer(r'(\d+)\s*(\D)\s*(\d+)\s*=\s*(\S+)', prompt):
         exs.append((m.group(1), m.group(2), m.group(3), m.group(4)))
     qm = re.search(r'determine the result for:\s*(\d+)\s*(\D)\s*(\d+)', prompt)
     if not qm:
@@ -131,8 +168,10 @@ def gold_of(ans):
 
 
 def solve(prompt, gold=None):
-    """Return (ans, cand) if a single operator family reproduces the query
-    group (and matches gold when provided), else None."""
+    """Return (ans, (cand, decor)) if a single operator family (with an optional
+    operator-symbol output decoration) reproduces the query group (and matches
+    gold when provided), else None. `decor` is 'none' for the common case so the
+    pure-integer puzzles behave exactly as before."""
     exs, q = parse(prompt)
     if not q:
         return None
@@ -140,35 +179,38 @@ def solve(prompt, gold=None):
     group = [(a, b, r) for (a, sym, b, r) in exs if sym == qsym]
     if not group:
         return None
-    for cand in CANDS:
-        ok = True
-        for (a, b, r) in group:
-            if apply_cand(cand, a, b) != r:
-                ok = False
-                break
-        if not ok:
-            continue
-        ans = apply_cand(cand, qa, qb)
-        if ans is None:
-            continue
-        if gold is not None and ans != gold:
-            continue
-        return ans, cand
+    for decor in DECORS:
+        for cand in CANDS:
+            ok = True
+            for (a, b, r) in group:
+                if apply_cand_dec(cand, decor, qsym, a, b) != r:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            ans = apply_cand_dec(cand, decor, qsym, qa, qb)
+            if ans is None:
+                continue
+            if gold is not None and ans != gold:
+                continue
+            return ans, (cand, decor)
     return None
 
 
 def format_cot(exs, q, ans, cand):
     """Build a compact, verified chain-of-thought (v8 style)."""
     qa, qsym, qb = q
+    base, decor = _split_cand(cand)
     group = [(a, b, r) for (a, sym, b, r) in exs if sym == qsym]
-    expr = cand_str(cand)
+    expr = cand_str_dec((base, decor), qsym)
     lines = ["<think>"]
     lines.append("The operands and results are plain numbers; only the operator "
                  "symbol has hidden semantics.")
     lines.append(f"Deduced rule for operator '{qsym}':  f(A,B) = {expr}")
     lines.append("Verify against the examples:")
     for (a, b, r) in group[:6]:
-        lines.append(f"  {a} {qsym} {b} = {r}  =>  f({a},{b}) = {apply_cand(cand, a, b)}")
+        lines.append(f"  {a} {qsym} {b} = {r}  =>  f({a},{b}) = "
+                     f"{apply_cand_dec(base, decor, qsym, a, b)}")
     lines.append(f"Apply to the question {qa} {qsym} {qb}:")
     lines.append(f"  f({qa},{qb}) = {ans}")
     lines.append("</think>")
