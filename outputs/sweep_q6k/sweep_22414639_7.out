@@ -1,8 +1,0 @@
-=== SWEEP TASK 7: seq=128 rank=32 lr=1e-4 ===
-=== Install deps ===
-torch: 2.5.1+cu124
-=== Training seq=128 r=32 lr=1e-4 ===
-GPU: Quadro RTX 6000 (23.6 GB) | seq=128 r=32 lr=0.0001
-🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
-🦥 Unsloth Zoo will now patch everything to make training faster!
-Exit: 1
