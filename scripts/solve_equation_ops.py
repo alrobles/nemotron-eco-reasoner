@@ -242,7 +242,12 @@ def _operand(rng):
 def make_puzzle(cand, rng, n_examples=3, distractor=True):
     """Generate a verified equation puzzle for a given operator family `cand`.
 
+    `cand` may be a base 4-tuple operator family or a (base, decor) pair (the
+    form the solver returns when the result carries the operator symbol). For
+    decor='none' this behaves exactly as before.
+
     Returns (prompt, gold, exs, q, cand) or None if degenerate."""
+    base, decor = _split_cand(cand)
     qsym = rng.choice(SYMBOLS)
     lines = []
     seen = set()
@@ -250,7 +255,7 @@ def make_puzzle(cand, rng, n_examples=3, distractor=True):
     while len(lines) < n_examples and tries < 200:
         tries += 1
         a, b = _operand(rng), _operand(rng)
-        r = apply_cand(cand, a, b)
+        r = apply_cand_dec(base, decor, qsym, a, b)
         if r is None or (a, b) in seen:
             continue
         seen.add((a, b))
@@ -262,7 +267,7 @@ def make_puzzle(cand, rng, n_examples=3, distractor=True):
         qa, qb = _operand(rng), _operand(rng)
         if (qa, qb) in seen:
             continue
-        gold = apply_cand(cand, qa, qb)
+        gold = apply_cand_dec(base, decor, qsym, qa, qb)
         if gold is not None:
             break
     else:
