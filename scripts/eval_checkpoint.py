@@ -111,19 +111,17 @@ def patch_moe(model):
     print(f"MoE patched: {patched} layers", flush=True)
 
 
-SYS_PROMPT = (
-    "You are an expert puzzle solver. Think step by step and place "
-    "your final answer inside \\boxed{}."
-)
+# Must match the training records EXACTLY (data/train_deterministic_v*.jsonl):
+# system = this string, user = the bare prompt. Any deviation pushes the model
+# off-distribution and it never closes </think> / emits \boxed within the budget
+# (that was the pred=None-everywhere bug).
+SYS_PROMPT = "You are a helpful assistant that solves puzzles step by step."
 
 
 def build_msgs(prompt):
     return [
         {"role": "system", "content": SYS_PROMPT},
-        {
-            "role": "user",
-            "content": prompt + "\n\nPlease put your final answer inside \\boxed{}.",
-        },
+        {"role": "user", "content": prompt},
     ]
 
 
