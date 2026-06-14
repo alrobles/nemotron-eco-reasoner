@@ -1,99 +1,0 @@
-Unsloth: Tokenizing ["text"] (num_proc=28):   0%|          | 0/7086 [00:00<?, ? examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):   4%|▎         | 254/7086 [00:24<11:02, 10.32 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  14%|█▍        | 1014/7086 [00:25<01:54, 52.92 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  32%|███▏      | 2279/7086 [00:25<00:32, 148.76 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  36%|███▌      | 2532/7086 [00:26<00:26, 169.45 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  39%|███▉      | 2785/7086 [00:26<00:22, 193.13 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  43%|████▎     | 3038/7086 [00:27<00:19, 205.66 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  50%|█████     | 3544/7086 [00:27<00:11, 303.49 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  54%|█████▎    | 3797/7086 [00:29<00:13, 237.05 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  61%|██████    | 4303/7086 [00:30<00:08, 334.39 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  64%|██████▍   | 4556/7086 [00:31<00:08, 289.53 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  79%|███████▊  | 5568/7086 [00:32<00:02, 506.84 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  82%|████████▏ | 5821/7086 [00:32<00:02, 520.95 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  86%|████████▌ | 6074/7086 [00:33<00:02, 418.47 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28):  89%|████████▉ | 6327/7086 [00:34<00:01, 429.38 examples/s]Unsloth: Tokenizing ["text"] (num_proc=28): 100%|██████████| 7086/7086 [00:47<00:00, 150.11 examples/s]
-Unsloth: Packing train dataset (num_proc=28):   0%|          | 0/7086 [00:00<?, ? examples/s]Unsloth: Packing train dataset (num_proc=28):   4%|▎         | 253/7086 [00:21<09:46, 11.65 examples/s]Unsloth: Packing train dataset (num_proc=28):  11%|█         | 760/7086 [00:22<02:25, 43.47 examples/s]Unsloth: Packing train dataset (num_proc=28):  14%|█▍        | 1013/7086 [00:22<01:32, 65.52 examples/s]Unsloth: Packing train dataset (num_proc=28):  18%|█▊        | 1266/7086 [00:22<01:01, 94.13 examples/s]Unsloth: Packing train dataset (num_proc=28):  21%|██▏       | 1519/7086 [00:22<00:40, 136.15 examples/s]Unsloth: Packing train dataset (num_proc=28):  68%|██████▊   | 4809/7086 [00:22<00:02, 924.68 examples/s]Unsloth: Packing train dataset (num_proc=28):  93%|█████████▎| 6580/7086 [00:23<00:00, 1475.54 examples/s]Unsloth: Packing train dataset (num_proc=28): 100%|██████████| 7086/7086 [00:37<00:00, 190.83 examples/s] 
-  0%|          | 0/100 [00:00<?, ?it/s]Traceback (most recent call last):
-  File "<string>", line 68, in <module>
-  File "/tmp/unsloth_compiled_cache/UnslothSFTTrainer.py", line 84, in wrapper
-    output = f(self, *args, **kwargs)
-             ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/transformers/trainer.py", line 2325, in train
-    return inner_training_loop(
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/transformers/trainer.py", line 2674, in _inner_training_loop
-    tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/tmp/unsloth_compiled_cache/UnslothSFTTrainer.py", line 1400, in training_step
-    return super().training_step(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "<string>", line 91, in _unsloth_training_step
-  File "/opt/conda/lib/python3.11/site-packages/accelerate/accelerator.py", line 2730, in backward
-    self.scaler.scale(loss).backward(**kwargs)
-  File "/opt/conda/lib/python3.11/site-packages/torch/_tensor.py", line 581, in backward
-    torch.autograd.backward(
-  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/__init__.py", line 347, in backward
-    _engine_run_backward(
-  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/graph.py", line 825, in _engine_run_backward
-    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/function.py", line 307, in apply
-    return user_fn(self, *args)
-           ^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/utils/checkpoint.py", line 304, in backward
-    outputs = ctx.run_function(*detached_inputs)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/a474r867/.cache/huggingface/modules/transformers_modules/cbd3fa9f933d55ef16a84236559f4ee2a0526848/modeling_nemotron_h.py", line 777, in forward
-    hidden_states = self.mixer(
-                    ^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/a474r867/.cache/huggingface/modules/transformers_modules/cbd3fa9f933d55ef16a84236559f4ee2a0526848/modeling_nemotron_h.py", line 715, in forward
-    return self.cuda_kernels_forward(hidden_states, cache_params, cache_position, attention_mask)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/a474r867/.cache/huggingface/modules/transformers_modules/cbd3fa9f933d55ef16a84236559f4ee2a0526848/modeling_nemotron_h.py", line 362, in cuda_kernels_forward
-    projected_states = self.in_proj(hidden_states)
-                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/peft/tuners/lora/bnb.py", line 480, in forward
-    result = self.base_layer(x, *args, **kwargs)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/tmp/pip_3700142/lib/python3.11/site-packages/unsloth_zoo/temporary_patches/bitsandbytes.py", line 106, in forward
-    return bitsandbytes.matmul_4bit(x, weight, bias=bias, quant_state=quant_state).to(inp_dtype)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/tmp/pip_3700142/lib/python3.11/site-packages/bitsandbytes/autograd/_functions.py", line 401, in matmul_4bit
-    return MatMul4Bit.apply(A, B, out, bias, quant_state)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/autograd/function.py", line 575, in apply
-    return super().apply(*args, **kwargs)  # type: ignore[misc]
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/tmp/pip_3700142/lib/python3.11/site-packages/bitsandbytes/autograd/_functions.py", line 315, in forward
-    output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
-                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/tmp/pip_3700142/lib/python3.11/site-packages/bitsandbytes/functional.py", line 1050, in dequantize_4bit
-    out = torch.ops.bitsandbytes.dequantize_4bit.default(
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/_ops.py", line 716, in __call__
-    return self._op(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/_compile.py", line 32, in inner
-    return disable_fn(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/_dynamo/eval_frame.py", line 632, in _fn
-    return fn(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^
-  File "/opt/conda/lib/python3.11/site-packages/torch/library.py", line 566, in func_no_dynamo
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/tmp/pip_3700142/lib/python3.11/site-packages/bitsandbytes/backends/cuda/ops.py", line 363, in _
-    out = torch.empty(shape, dtype=dtype, device=A.device)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 54.00 MiB. GPU 0 has a total capacity of 23.46 GiB of which 41.00 MiB is free. Including non-PyTorch memory, this process has 23.42 GiB memory in use. Of the allocated memory 21.97 GiB is allocated by PyTorch, and 134.11 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

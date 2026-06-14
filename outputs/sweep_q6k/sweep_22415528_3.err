@@ -1,80 +1,0 @@
-Map:   0%|          | 0/7086 [00:00<?, ? examples/s]Map:   0%|          | 1/7086 [00:00<13:22,  8.83 examples/s]Map:  11%|█         | 790/7086 [00:00<00:01, 4401.44 examples/s]Map:  20%|█▉        | 1399/7086 [00:00<00:01, 5111.88 examples/s]Map:  30%|███       | 2142/7086 [00:00<00:00, 6004.16 examples/s]Map:  41%|████▏     | 2940/7086 [00:00<00:00, 6703.28 examples/s]Map:  52%|█████▏    | 3698/7086 [00:00<00:00, 6997.12 examples/s]Map:  63%|██████▎   | 4438/7086 [00:00<00:00, 7124.89 examples/s]Map:  77%|███████▋  | 5442/7086 [00:00<00:00, 6943.80 examples/s]Map:  88%|████████▊ | 6263/7086 [00:01<00:00, 6124.49 examples/s]Map:  98%|█████████▊| 6946/7086 [00:01<00:00, 6298.96 examples/s]Map: 100%|██████████| 7086/7086 [00:01<00:00, 3754.16 examples/s]
-/var/spool/slurmd/job22415532/slurm_script: line 130: 1400084 Bus error               (core dumped) apptainer exec --nv --bind "/dev/shm,/tmp:$P" --env PYTHONUSERBASE=$P --env HF_HUB_OFFLINE=1 --env TORCH_COMPILE_DISABLE=1 --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True $C env PYTHONUNBUFFERED=1 python3 -c "
-import os, sys, time, json, torch
-os.environ['TOKENIZERS_PARALLELISM']='false'
-torch.backends.cuda.matmul.allow_tf32=True
-import types as _types
-
-SEQ=$SEQ; RANK=$RANK; LR=$LR
-MODEL='$M'; DATA='$D'; OUT='$O'
-t0=time.time()
-
-gpu=torch.cuda.get_device_name(0)
-vram=torch.cuda.get_device_properties(0).total_memory/1e9
-print(f'GPU: {gpu} ({vram:.1f} GB) | seq={SEQ} r={RANK} lr={LR}')
-
-from unsloth import FastLanguageModel
-model,tok=FastLanguageModel.from_pretrained(
-    model_name=MODEL, max_seq_length=SEQ, load_in_4bit=True,
-    trust_remote_code=True, local_files_only=True)
-
-_p=0
-for mod in model.modules():
-    if not (hasattr(mod,'moe') and hasattr(mod,'experts') and callable(mod.moe)): continue
-    def mk(module):
-        def f(_self,hs,idx,w):
-            hs=hs.view(-1,hs.size(-1)); fi=idx.view(-1); hs=hs.repeat_interleave(idx.shape[-1],dim=0)
-            out=torch.zeros_like(hs); dt=out.dtype
-            for i,e in enumerate(module.experts):
-                mask=(fi==i).nonzero(as_tuple=True)[0]
-                if mask.numel()==0: continue
-                eh=hs[mask]; eo=e(eh); wo=eo*w.view(-1)[mask].unsqueeze(-1)
-                if wo.dtype!=dt: wo=wo.to(dt)
-                out.index_add_(0,mask,wo)
-            return out.view(-1,idx.shape[-1],out.size(-1)).sum(dim=1)
-        return f
-    mod.moe=_types.MethodType(mk(mod),mod); _p+=1
-print(f'MoE: {_p}')
-
-model=FastLanguageModel.get_peft_model(model, r=RANK, lora_alpha=RANK,
-    target_modules=['q_proj','k_proj','v_proj','o_proj','in_proj','out_proj','up_proj','down_proj'],
-    use_gradient_checkpointing='unsloth')
-model.print_trainable_parameters()
-
-from datasets import load_dataset
-ds=load_dataset('json', data_files={'train': DATA}, split='train')
-def fmt(ex):
-    msgs=ex.get('messages')
-    if not msgs: msgs=[{'role':'user','content':ex.get('prompt','?')},{'role':'assistant','content':ex.get('answer','?')}]
-    return {'text': tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=False)}
-ds=ds.map(fmt)
-print(f'Data: {len(ds)}')
-
-from trl import SFTTrainer, SFTConfig
-trainer=SFTTrainer(model=model,
-    args=SFTConfig(
-        output_dir=OUT, max_steps=100,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=8,
-        learning_rate=LR, max_seq_length=SEQ,
-        warmup_steps=20, logging_steps=5, save_steps=50,
-        save_total_limit=2,
-        bf16=torch.cuda.is_bf16_supported(),
-        fp16=not torch.cuda.is_bf16_supported(),
-        remove_unused_columns=False, report_to='none',
-        dataloader_num_workers=0, packing=True),
-    train_dataset=ds, processing_class=tok)
-
-print(f'SWEEP_START: seq={SEQ} rank={RANK} lr={LR}')
-trainer.train()
-elapsed=(time.time()-t0)/60
-print(f'SWEEP_DONE: seq={SEQ} rank={RANK} lr={LR} time={elapsed:.1f}m')
-
-os.makedirs(OUT, exist_ok=True)
-trainer.save_model(OUT)
-tok.save_pretrained(OUT)
-summary={'seq_len':SEQ,'rank':RANK,'lr':LR,'time_min':elapsed,'gpu':gpu,'vram_gb':vram}
-with open(f'{OUT}/sweep_summary.json','w') as f:
-    json.dump(summary,f)
-print(f'Saved to {OUT}')
-"

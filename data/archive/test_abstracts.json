@@ -1,0 +1,23 @@
+[
+  {
+    "pmid": "test1",
+    "title": "Thermal tolerance limits and range shifts in European butterflies under climate change",
+    "abstract": "Climate change is driving poleward range shifts in many species, yet the mechanisms underlying these shifts remain poorly understood. We analysed 20 years of transect data for 57 European butterfly species across 14 countries, combined with experimental measurements of upper and lower thermal tolerance limits (CTmax and CTmin). Species with higher CTmax expanded their northern range boundaries by an average of 14.4 km per decade, while CTmin did not predict range shifts. Importantly, the rate of range expansion was 2.3 times faster in species that also showed phenological advances in their host plant availability. Our results demonstrate that range shifts are driven by interacting physiological constraints and trophic mismatches, rather than thermal tolerance alone. Conservation strategies should account for both direct thermal effects and indirect phenological coupling when predicting species responses to warming.",
+    "pub_year": "2023",
+    "journal": "Ecology Letters"
+  },
+  {
+    "pmid": "test2",
+    "title": "Joint species distribution models reveal biotic interactions dominate over climate in structuring Andean bird communities",
+    "abstract": "Understanding the relative importance of abiotic and biotic factors in shaping species assemblages is a fundamental question in community ecology. We applied hierarchical Bayesian joint species distribution models (JSDMs) to 12 years of point-count data for 234 Andean bird species across a 3500 m elevational gradient. After accounting for environmental covariates including temperature, precipitation, and habitat structure, residual species co-occurrence patterns explained 47% of the variation in community composition, compared to 31% explained by climate variables alone. Competitive exclusion was the dominant interaction at low elevations, while facilitative interactions increased with elevation, particularly among closely related species. These findings challenge the prevailing view that climate is the primary filter structuring tropical montane communities and highlight the need to incorporate species interactions into predictive models of biodiversity response to global change.",
+    "pub_year": "2024",
+    "journal": "Nature Ecology & Evolution"
+  },
+  {
+    "pmid": "test3",
+    "title": "Functional diversity loss precedes taxonomic extinction in fragmented tropical forests",
+    "abstract": "Habitat fragmentation is a leading cause of biodiversity loss, but functional diversity—the range of ecological roles performed by species—may decline before taxonomic richness. We resurveyed 37 forest fragments (1-1000 ha) in the Brazilian Atlantic Forest originally sampled in 1995, measuring six functional traits (body mass, diet breadth, foraging stratum, dispersal ability, generation length, and thermal tolerance) for 189 bird and 67 mammal species. Taxonomic richness declined by 12% over 25 years, but functional diversity declined by 31%. Large-bodied frugivores and species with narrow thermal tolerances were disproportionately lost, leading to functional homogenization. The ecosystem consequences were measurable: seed dispersal distances decreased by 42% in fragments smaller than 100 ha. Our results demonstrate that functional diversity metrics provide an early-warning signal of ecosystem degradation that is masked by taxonomic metrics alone, with direct implications for conservation monitoring and prioritization.",
+    "pub_year": "2025",
+    "journal": "Science"
+  }
+]

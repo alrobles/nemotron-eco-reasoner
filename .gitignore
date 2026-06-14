@@ -25,3 +25,8 @@ wandb/
 build-error.log
 build-loop.sh
 outputs/
+
+# Auto-generated / artifacts (not source)
+unsloth_compiled_cache/
+*.bak
+nvidia-nemotron-model-reasoning-challenge.zip
