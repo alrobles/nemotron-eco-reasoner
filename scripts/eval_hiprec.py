@@ -152,6 +152,18 @@ def build_msgs(prompt):
     ]
 
 
+def _eos_ids(model, tok):
+    """The model's own recommended stop ids ([2, 11] for NemotronH); fall back to
+    the tokenizer eos. Matches the Kaggle inference path."""
+    try:
+        e = model.generation_config.eos_token_id
+    except Exception:
+        e = None
+    if e is None:
+        e = tok.eos_token_id
+    return e
+
+
 def generate_batch(model, tok, cache_cls, prompts, max_new_tokens, use_explicit_cache):
     enc = tok.apply_chat_template(
         [build_msgs(p) for p in prompts],
@@ -161,13 +173,22 @@ def generate_batch(model, tok, cache_cls, prompts, max_new_tokens, use_explicit_
         return_tensors="pt",
         return_dict=True,
     ).to(model.device)
+    # Reasoning models (NemotronH/R1-style) collapse into single-token repetition
+    # under greedy decoding; the model card ships do_sample=true. Sample to match
+    # the Kaggle inference path. Env overridable.
+    do_sample = os.environ.get("DO_SAMPLE", "1") == "1"
     gen_kwargs = dict(
         max_new_tokens=max_new_tokens,
-        do_sample=False,
+        do_sample=do_sample,
         pad_token_id=tok.pad_token_id,
-        eos_token_id=tok.eos_token_id,
+        eos_token_id=_eos_ids(model, tok),
         use_cache=True,
     )
+    if do_sample:
+        gen_kwargs.update(
+            temperature=float(os.environ.get("TEMP", "0.6")),
+            top_p=float(os.environ.get("TOP_P", "0.95")),
+        )
     if use_explicit_cache:
         cache = make_cache(cache_cls, model, enc["input_ids"].shape[0])
         if cache is not None:
@@ -223,17 +244,20 @@ def load_model(model_path, adapter_path, quant):
     from peft import PeftModel
 
     model = PeftModel.from_pretrained(model, adapter_path)
-    patch_moe(model)
+    # The custom dense MoE dispatch + the hand-built HybridMamba cache corrupt the
+    # forward pass (a KNOWN-GOOD adapter degenerates to single-token repetition
+    # here while scoring 0.67 on Kaggle). The stock path (no patch, generate()
+    # builds its own cache) reproduces Kaggle exactly, so both are opt-in only.
+    if os.environ.get("PATCH_MOE", "0") == "1":
+        patch_moe(model)
     force_torch_mamba_path()
     model.eval()
 
-    # An explicit single-device cache only makes sense when the whole model lives
-    # on one device. With device_map="auto" (bf16, sharded) let generate() build
-    # its own cache so tensors land on the right shard.
+    use_explicit_cache = os.environ.get("EXPLICIT_CACHE", "0") == "1"
     devices = {str(p.device) for p in model.parameters()}
-    use_explicit_cache = len(devices) == 1
     print(
-        f"param devices={sorted(devices)} explicit_cache={use_explicit_cache}",
+        f"param devices={sorted(devices)} explicit_cache={use_explicit_cache} "
+        f"patch_moe={os.environ.get('PATCH_MOE', '0')}",
         flush=True,
     )
     return model, tok, use_explicit_cache
@@ -256,6 +280,7 @@ def main():
     )
     quant = os.environ.get("QUANT", "8bit")
 
+    torch.manual_seed(args.seed)
     model, tok, use_explicit_cache = load_model(model_path, args.adapter, quant)
 
     # Left padding so every prompt in a batch ends at the same column.

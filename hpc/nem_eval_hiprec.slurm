@@ -36,6 +36,12 @@ CATS=${CATS:-}
 QUANT=${QUANT:-8bit}
 # NemotronH reasons in a long <think> block before \boxed{}; 4096 lets it finish.
 MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-4096}
+# sm_120 has a fused causal_conv1d image now, so keep the fast path (=0). Reasoning
+# models need sampling: do_sample on, temp 0.6 / top_p 0.95 (the Kaggle path).
+FORCE_TORCH_MAMBA=${FORCE_TORCH_MAMBA:-0}
+DO_SAMPLE=${DO_SAMPLE:-1}
+TEMP=${TEMP:-0.6}
+TOP_P=${TOP_P:-0.95}
 rm -rf $P 2>/dev/null; mkdir -p $P
 
 echo "=== EVAL_HIPREC job=$SLURM_JOB_ID $(date) adapter=$ADAPTER quant=$QUANT n_per_cat=$N_PER_CAT batch=$BATCH cats='$CATS' ==="
@@ -60,6 +66,7 @@ apptainer exec --nv --bind "/dev/shm,/tmp,$M,$REPO" \
     --env TORCH_COMPILE_DISABLE=1 --env OMP_NUM_THREADS=1 \
     --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1 \
     --env MODEL_PATH=$M --env QUANT=$QUANT --env TRITON_CACHE_DIR=/tmp/triton_$SLURM_JOB_ID \
+    --env FORCE_TORCH_MAMBA=$FORCE_TORCH_MAMBA --env DO_SAMPLE=$DO_SAMPLE --env TEMP=$TEMP --env TOP_P=$TOP_P \
     $C env PYTHONUNBUFFERED=1 python3 -u $REPO/scripts/eval_hiprec.py \
     --adapter "$ADAPTER" --data $REPO/data/kaggle_classified.jsonl \
     --n-per-cat "$N_PER_CAT" --max-new-tokens "$MAX_NEW_TOKENS" \
