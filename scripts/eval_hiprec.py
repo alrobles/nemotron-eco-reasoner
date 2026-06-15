@@ -70,15 +70,27 @@ def make_cache(cache_cls, model, batch_size):
 
 
 def force_torch_mamba_path():
-    """Make the Mamba-2 mixer use its pure-torch implementation.
+    """Force the Mamba-2 mixer onto its pure-torch path *only* where the fused
+    kernel would crash.
 
-    NemotronH's fast path calls a precompiled ``causal_conv1d`` CUDA kernel. That
-    wheel ships no Blackwell (sm_100) kernel image, so on an RTX PRO 6000 the
-    forward dies with ``cudaErrorNoKernelImageForDevice`` (and likewise for any
-    GPU arch the wheel was not built for). Setting the module-level
-    ``is_fast_path_available=False`` forces ``torch_forward`` — identical math at
-    the same precision, just unfused. This is exactly what the bf16 training run
-    did on Blackwell (it dropped the mamba_ssm/causal_conv1d wheels)."""
+    NemotronH's fast path calls a precompiled ``causal_conv1d`` CUDA kernel whose
+    wheel ships no Blackwell (sm_100) image, so on an RTX PRO 6000 the forward
+    dies with ``cudaErrorNoKernelImageForDevice``. On sm_80/sm_86 (A100/A40) the
+    fused kernels exist and are *far* faster than the unfused torch scan (whose
+    cached generation is ~O(n^2)), so we keep them there. Auto-detects the GPU
+    arch; override with FORCE_TORCH_MAMBA=1 (force torch) or =0 (keep fused)."""
+    env = os.environ.get("FORCE_TORCH_MAMBA", "auto").lower()
+    if env in ("0", "false", "no"):
+        print("FORCE_TORCH_MAMBA=0: keeping fused mamba kernels", flush=True)
+        return
+    if env not in ("1", "true", "yes"):  # auto
+        try:
+            major = torch.cuda.get_device_capability()[0]
+        except Exception:
+            major = 0
+        if major < 10:  # < Blackwell: fused causal_conv1d kernel image exists
+            print(f"sm_{major}x: fused mamba kernels OK, keeping fast path", flush=True)
+            return
     n = 0
     for name, mod in list(sys.modules.items()):
         if name.endswith("modeling_nemotron_h") and hasattr(
