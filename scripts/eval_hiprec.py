@@ -69,6 +69,26 @@ def make_cache(cache_cls, model, batch_size):
     return None
 
 
+def force_torch_mamba_path():
+    """Make the Mamba-2 mixer use its pure-torch implementation.
+
+    NemotronH's fast path calls a precompiled ``causal_conv1d`` CUDA kernel. That
+    wheel ships no Blackwell (sm_100) kernel image, so on an RTX PRO 6000 the
+    forward dies with ``cudaErrorNoKernelImageForDevice`` (and likewise for any
+    GPU arch the wheel was not built for). Setting the module-level
+    ``is_fast_path_available=False`` forces ``torch_forward`` — identical math at
+    the same precision, just unfused. This is exactly what the bf16 training run
+    did on Blackwell (it dropped the mamba_ssm/causal_conv1d wheels)."""
+    n = 0
+    for name, mod in list(sys.modules.items()):
+        if name.endswith("modeling_nemotron_h") and hasattr(
+            mod, "is_fast_path_available"
+        ):
+            mod.is_fast_path_available = False
+            n += 1
+    print(f"forced torch mamba path on {n} module(s)", flush=True)
+
+
 def patch_moe(model):
     """Dense per-expert MoE dispatch (same as training): the stock NemotronH
     dispatch hits a bf16/fp32 index_add_ dtype mismatch when LoRA is active."""
@@ -192,6 +212,7 @@ def load_model(model_path, adapter_path, quant):
 
     model = PeftModel.from_pretrained(model, adapter_path)
     patch_moe(model)
+    force_torch_mamba_path()
     model.eval()
 
     # An explicit single-device cache only makes sense when the whole model lives
