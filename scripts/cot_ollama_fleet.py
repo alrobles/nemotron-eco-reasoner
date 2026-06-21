@@ -140,8 +140,46 @@ def call_ollama(endpoint: str, model: str, system: str, user_msg: str,
         cot = _extract_json(reasoning_raw)
     
     if cot is None:
-        return {"_error": "JSON parse failed: no valid JSON found",
-                "_content": content[:300], "_reasoning": reasoning_raw[:300]}
+        # Fallback: if model didn't output JSON, use raw content + reasoning as CoT
+        # The reasoning field contains the actual chain-of-thought
+        if reasoning_raw.strip() or content.strip():
+            cot = {
+                "paper_pmid": "",
+                "paper_title": "",
+                "method": "",
+                "context": "",
+                "reasoning": reasoning_raw[:2000] if reasoning_raw else content[:2000],
+                "code": "",
+                "_fallback": True,
+            }
+        else:
+            return {"_error": "JSON parse failed: no valid JSON found",
+                    "_content": content[:500], "_reasoning": reasoning_raw[:500]}
+
+    # Flatten any nested dict/list fields into strings (model often nests)
+    for field in ("method", "context", "reasoning", "code"):
+        if field in cot:
+            val = cot[field]
+            if isinstance(val, dict):
+                # Flatten dict fields into readable text
+                parts = []
+                for k, v in val.items():
+                    if isinstance(v, str):
+                        parts.append(f"{k}: {v}")
+                    elif isinstance(v, list):
+                        parts.append(f"{k}: {'; '.join(str(x) for x in v)}")
+                cot[field] = " | ".join(parts) if parts else str(val)
+            elif isinstance(val, list):
+                # Flatten list of step objects
+                parts = []
+                for item in val:
+                    if isinstance(item, dict):
+                        parts.append(str(item))
+                    else:
+                        parts.append(str(item))
+                cot[field] = "\n".join(parts) if parts else str(val)
+            elif not isinstance(val, str):
+                cot[field] = str(val)
 
     cot["_reasoning"] = reasoning_raw
     cot["_prompt_tokens"] = prompt_tokens
@@ -212,14 +250,21 @@ def cot_to_messages(cot: dict, paper: dict) -> dict:
     
     # Add the structured output fields
     structured = []
-    if "context" in cot:
+    if "context" in cot and isinstance(cot["context"], str):
         structured.append(f"CONTEXT: {cot['context']}")
-    if "method" in cot:
+    if "method" in cot and isinstance(cot["method"], str):
         structured.append(f"METHOD: {cot['method']}")
-    if "reasoning" in cot:
+    if "reasoning" in cot and isinstance(cot["reasoning"], str):
         structured.append(cot["reasoning"])
     if "code" in cot:
-        structured.append(f"\nCODE:\n```python\n{cot['code']}\n```")
+        code = cot["code"]
+        if isinstance(code, dict):
+            # Model returned code as {"language": "python", "code": "..."}
+            code_str = code.get("code", "") or code.get("content", "") or json.dumps(code)
+        else:
+            code_str = str(code)
+        if code_str.strip():
+            structured.append(f"\nCODE:\n```python\n{code_str}\n```")
     
     parts.append("\n".join(structured))
 
