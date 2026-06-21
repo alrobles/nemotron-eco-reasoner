@@ -1,15 +1,15 @@
 #!/bin/bash
-# harvest_ecoevorxiv.slurm — Harvest ecoevorxiv preprints
+# harvest_ecoevorxiv.slurm — Harvest ecoevorxiv preprints (v2: fixed API)
 #SBATCH --job-name=harvest-ecorxiv
 #SBATCH --partition=sixhour
-#SBATCH --time=01:00:00
+#SBATCH --time=01:30:00
 #SBATCH --mem=2G
 #SBATCH --cpus-per-task=1
-#SBATCH --output=/home/a474r867/scratch/harvest_ecoevorxiv_%j.out
-#SBATCH --error=/home/a474r867/scratch/harvest_ecoevorxiv_%j.err
+#SBATCH --output=/home/a474r867/scratch/harvest_ecoevorxiv_v2_%j.out
+#SBATCH --error=/home/a474r867/scratch/harvest_ecoevorxiv_v2_%j.err
 
 python3 /home/a474r867/scratch/cot_generation/harvest_ecoevorxiv.py \
-    --limit 50 \
+    --limit 100 \
     --output /home/a474r867/scratch/cot_generation/ecoevorxiv_papers.jsonl
 EXIT=$?
 echo "Exit: $EXIT at $(date)"

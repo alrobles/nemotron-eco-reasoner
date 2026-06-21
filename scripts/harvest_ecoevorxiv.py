@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-harvest_ecoevorxiv.py — Harvest preprints from ecoevorxiv.org (OSF Preprints API).
-ecoevorxiv is the premier preprint server for ecology, evolution, and conservation.
+harvest_ecoevorxiv.py — Harvest preprints from ecoevorxiv.org (Janeway API).
+Correct API: https://ecoevorxiv.org/api/preprints/?search=TERM&limit=N
 
-API: https://ecoevorxiv.org/api/v2/preprints/  (OSF v2 API)
-No auth required for reading public preprints.
+ecoevorxiv has 3,370+ ecology preprints. Free, no auth.
 
 Usage:
     python3 harvest_ecoevorxiv.py --limit 100 --output ecoevorxiv_papers.jsonl
@@ -15,16 +14,10 @@ import json
 import sys
 import time
 import urllib.request
-import urllib.error
+import urllib.parse
 
-API = "https://api.osf.io/v2/preprints/"
-FILTER = "?filter[provider]=ecoevorxiv"
-PAGE_SIZE = 50
+API = "https://ecoevorxiv.org/api/preprints/"
 
-# Also try ecoevorxiv direct search endpoint
-SEARCH_API = "https://ecoevorxiv.org/api/v1/search/preprints/"
-
-# Ecological keyword searches  
 TOPICS = [
     "species distribution model",
     "climate change biodiversity",
@@ -33,64 +26,73 @@ TOPICS = [
     "community ecology",
     "population dynamics",
     "phylogenetic comparative",
-    "ecological niche",
-    "biodiversity hotspot",
-    "ecosystem service",
-    "trait-based ecology",
-    "functional diversity",
-    "invasion biology",
-    "movement ecology",
-    "disease ecology",
-    "urban ecology",
-    "tropical ecology",
-    "marine biodiversity",
-    "freshwater ecology",
-    "pollination network",
-    "forest ecology",
-    "grassland ecology",
-    "spatial ecology",
-    "occupancy model",
-    "joint species distribution",
-    "remote sensing biodiversity",
-    "genetic diversity conservation",
-    "phenological change",
-    "range shift",
-    "extinction risk",
+    "ecological niche model",
+    "biodiversity conservation",
+    "ecosystem services",
+    "functional trait diversity",
+    "invasive species",
+    "movement ecology dispersal",
+    "disease ecology zoonotic",
+    "urban ecology biodiversity",
+    "tropical forest biodiversity",
+    "marine conservation",
+    "freshwater biodiversity",
+    "pollinator network",
+    "forest ecology management",
+    "spatial ecology landscape",
+    "occupancy detection model",
+    "species distribution abundance",
+    "remote sensing land cover",
+    "genetic diversity population",
+    "phenological climate shift",
+    "range shift distribution",
+    "extinction risk assessment",
+    "restoration ecology",
+    "biodiversity monitoring",
+    "biogeography species richness",
+    "food web trophic network",
+    "coexistence competition niche",
+    "carbon sequestration ecosystem",
+    "meta-analysis ecology",
 ]
 
 
-def search_ecoevorxiv(query: str, limit: int = 50) -> list[dict]:
-    """Search ecoevorxiv via OSF API."""
-    url = f"{SEARCH_API}?q={urllib.request.quote(query)}&size={min(limit, 50)}"
+def search_ecoevorxiv(query: str, limit: int = 50, offset: int = 0) -> list[dict]:
+    """Search ecoevorxiv via Janeway API."""
+    url = f"{API}?search={urllib.parse.quote(query)}&limit={min(limit, 100)}&offset={offset}"
     
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": "EcoSeek/1.0 (ecoseek.org)",
-            "Accept": "application/vnd.api+json",
+            "Accept": "application/json",
         })
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
     except Exception as e:
+        print(f"  API error: {e}", file=sys.stderr)
         return []
     
     results = []
-    hits = data.get("hits", {}).get("hits", [])
-    for hit in hits:
-        src = hit.get("_source", {})
-        title = src.get("title", "")
-        abstract = src.get("abstract", "")
+    for item in data.get("results", []):
+        abstract = (item.get("abstract") or "").strip()
+        title = (item.get("title") or "").strip()
         if not title or not abstract or len(abstract) < 100:
             continue
         
+        authors = item.get("authors", [])
+        author_names = [f"{a.get('first_name','')} {a.get('last_name','')}".strip() for a in authors]
+        subjects = [s.get("name", "") for s in item.get("subject", [])]
+        
         results.append({
-            "pmid": f"ecoevorxiv:{src.get('guid', src.get('id', '?'))}",
+            "pmid": f"ecoevorxiv:{item.get('pk', '?')}",
             "title": title,
             "abstract": abstract,
-            "authors": ", ".join(src.get("authors", [])[:5]),
-            "journal": f"ecoevorxiv ({src.get('subject_area', 'ecology')})",
-            "pub_year": src.get("publication_year", src.get("date_published", "2024")[:4]),
+            "authors": "; ".join(author_names[:6]),
+            "journal": f"ecoevorxiv ({', '.join(subjects[:3])})",
+            "pub_year": (item.get("date_published") or "2025")[:4],
             "keywords": "",
-            "mesh_terms": "ecoevorxiv:" + (src.get("subject_area", "")),
+            "mesh_terms": "ecoevorxiv:" + (subjects[0] if subjects else ""),
+            "doi": item.get("preprint_doi", ""),
         })
     
     return results
@@ -98,18 +100,20 @@ def search_ecoevorxiv(query: str, limit: int = 50) -> list[dict]:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=50, help="Max papers per topic")
+    parser.add_argument("--limit", type=int, default=100, help="Max papers per topic")
     parser.add_argument("--output", default="ecoevorxiv_papers.jsonl")
     args = parser.parse_args()
     
-    print(f"ECOEVORXIV HARVEST: {len(TOPICS)} topics × {args.limit} papers")
+    print(f"ECOEVORXIV HARVEST: {len(TOPICS)} topics × ~{args.limit} papers")
+    print(f"API: {API}")
+    print()
     
     seen = set()
     all_papers = []
     topic_counts = {}
     
     for i, topic in enumerate(TOPICS):
-        print(f"  [{i+1}/{len(TOPICS)}] '{topic}'...", end=" ", flush=True)
+        print(f"  [{i+1}/{len(TOPICS)}] '{topic[:50]}...'", end=" ", flush=True)
         try:
             papers = search_ecoevorxiv(topic, limit=args.limit)
             new = [p for p in papers if p["pmid"] not in seen]
@@ -118,10 +122,10 @@ def main():
                 p["topic"] = topic
             topic_counts[topic] = len(new)
             all_papers.extend(new)
-            print(f"→ {len(new)} new")
+            print(f"→ {len(new)} new ({len(papers)} total)")
         except Exception as e:
             print(f"ERROR: {e}")
-        time.sleep(0.3)  # Rate limit
+        time.sleep(0.3)
     
     with open(args.output, "w") as f:
         for p in all_papers:
@@ -129,12 +133,12 @@ def main():
     
     print(f"\n{'='*50}")
     print(f"ECOEVORXIV COMPLETE")
-    print(f"  Total:  {len(all_papers)} unique papers")
+    print(f"  Total:  {len(all_papers)} unique papers (from {len(seen)} deduped)")
     print(f"  Output: {args.output}")
-    print(f"  Top topics:")
+    print(f"  Top topics by yield:")
     for label, count in sorted(topic_counts.items(), key=lambda x: -x[1])[:10]:
         bar = "█" * min(40, count // 3)
-        print(f"    {label[:40]:40s} {count:3d} {bar}")
+        print(f"    {label[:38]:38s} {count:3d} {bar}")
 
 
 if __name__ == "__main__":
