@@ -328,6 +328,7 @@ def main():
     parser.add_argument("--temperature", type=float, default=0.3, help="Generation temperature")
     parser.add_argument("--timeout", type=int, default=180, help="Timeout per generation (seconds)")
     parser.add_argument("--shuffle", action="store_true", help="Shuffle papers before processing")
+    parser.add_argument("--skip", type=int, default=0, help="Skip first N papers (resume)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -336,6 +337,9 @@ def main():
         sys.exit("ERROR: No endpoints found")
 
     papers = load_papers(args.papers, limit=args.limit or None, shuffle=args.shuffle)
+    if args.skip > 0:
+        papers = papers[args.skip:]
+        print(f"  Skipping first {args.skip} papers, {len(papers)} remaining")
     random.seed(args.seed)
 
     model = "deepseek-r1:14b"
@@ -357,18 +361,21 @@ def main():
         ep = endpoints[i % n_workers]
         tasks.append((i, paper, ep, model, args.max_tokens, args.temperature, args.timeout))
 
-    results = {}  # idx -> message dict
     failures = []
     t_start = time.time()
 
     # Dynamic delay per endpoint to avoid overwhelming them
     ep_last = {ep: 0.0 for ep in endpoints}
 
+    # Open output file for incremental writing
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    out_f = open(args.output, "a")  # append mode for resume safety
+    results_count = 0
+    
     with ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = {}
         for task in tasks:
             ep = task[2]
-            # Ensure minimum delay per endpoint
             now = time.time()
             wait = max(0, args.delay - (now - ep_last.get(ep, 0)))
             if wait > 0:
@@ -383,7 +390,11 @@ def main():
             try:
                 idx2, msg, err = fut.result()
                 if msg:
-                    results[idx] = msg
+                    # Write immediately to disk (incremental)
+                    rec = {k: v for k, v in msg.items() if not k.startswith("_")}
+                    out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    out_f.flush()
+                    results_count += 1
                 else:
                     failures.append((idx, err or "unknown"))
             except Exception as e:
@@ -393,28 +404,19 @@ def main():
                 elapsed = time.time() - t_start
                 rate = (i + 1) / elapsed * 60 if elapsed > 0 else 0
                 print(f"--- [{i+1}/{total}] {elapsed:.0f}s elapsed, ~{rate:.1f}/min "
-                      f"({len(results)} ok, {len(failures)} fail)", flush=True)
+                      f"({results_count} ok, {len(failures)} fail)", flush=True)
 
+    out_f.close()
     elapsed = time.time() - t_start
 
-    # Write results (preserve original order)
-    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    with open(args.output, "w") as f:
-        for i in range(total):
-            if i in results:
-                # Remove internal fields
-                rec = {k: v for k, v in results[i].items() if not k.startswith("_")}
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
-    # Summary
-    total_tokens_in = sum(r.get("_prompt_tokens", 0) for r in results.values())
-    total_tokens_out = sum(r.get("_completion_tokens", 0) for r in results.values())
+    # Summary (note: we don't have full token counts since we write incrementally)
+    total_tokens_in = 0  # lost with incremental mode
+    total_tokens_out = 0  # lost with incremental mode
 
     print(f"\n{'='*60}")
     print(f"DONE in {elapsed/60:.1f}min")
-    print(f"  Success:     {len(results)}/{total} ({len(results)/max(total,1)*100:.1f}%)")
+    print(f"  Success:     {results_count}/{total} ({results_count/max(total,1)*100:.1f}%)")
     print(f"  Failed:      {len(failures)}")
-    print(f"  Tokens:      {total_tokens_in:,} in + {total_tokens_out:,} out")
     print(f"  Output:      {args.output}")
 
     if failures:
@@ -424,7 +426,7 @@ def main():
                 f.write(json.dumps({"index": idx, "error": err}) + "\n")
         print(f"  Failures:    {fail_path}")
 
-    print(f"  Rate:        ~{len(results)/max(elapsed,1)*60:.1f} papers/min")
+    print(f"  Rate:        ~{results_count/max(elapsed,1)*60:.1f} papers/min")
 
 
 if __name__ == "__main__":
