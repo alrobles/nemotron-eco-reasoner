@@ -1,0 +1,9 @@
+# Ollama endpoints — cot_ollama_fleet.py
+# deepseek-r1:14b on Q6000 GPUs
+# Format: host:port
+r22r20n01:35765
+r22r25n01:49163
+r22r30n01:60117
+r22r15n01:51955
+r22r10n01:49973
+r22r35n01:53955
