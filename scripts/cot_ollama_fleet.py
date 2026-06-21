@@ -405,10 +405,12 @@ def main():
             try:
                 idx2, msg, err = fut.result()
                 if msg:
-                    # Write immediately to disk (incremental)
+                    # Write immediately to disk (incremental) + force NFS sync
                     rec = {k: v for k, v in msg.items() if not k.startswith("_")}
                     out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                     out_f.flush()
+                    if results_count % 5 == 0:
+                        os.fsync(out_f.fileno())  # force NFS sync every 5 papers
                     results_count += 1
                 else:
                     failures.append((idx, err or "unknown"))
@@ -421,6 +423,8 @@ def main():
                 print(f"--- [{i+1}/{total}] {elapsed:.0f}s elapsed, ~{rate:.1f}/min "
                       f"({results_count} ok, {len(failures)} fail)", flush=True)
 
+    out_f.flush()
+    os.fsync(out_f.fileno())
     out_f.close()
     elapsed = time.time() - t_start
 
