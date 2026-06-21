@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 harvest_biorxiv.py — Harvest ecology preprints from bioRxiv API.
-bioRxiv is the largest biology preprint server. Free, no auth.
+Crawls month-by-month across 2020-2026, filtering by ecological categories.
+bioRxiv categories: ecology, evolutionary biology, zoology, plant biology
 
 API: https://api.biorxiv.org/details/biorxiv/YYYY-MM-DD/YYYY-MM-DD/cursor
-Also supports full-text search via content_summary endpoint.
 
 Usage:
     python3 harvest_biorxiv.py --limit 200 --output biorxiv_papers.jsonl
@@ -15,115 +15,96 @@ import json
 import sys
 import time
 import urllib.request
-import urllib.parse
+from datetime import datetime, timedelta
 
-# bioRxiv content API — search by category/topic
-SEARCH_API = "https://api.biorxiv.org/details/biorxiv/"
+API = "https://api.biorxiv.org/details/biorxiv/"
 
-# Ecological subject areas in bioRxiv
-COLLECTIONS = [
-    "ecology",
-    "evolutionary-biology",
-    "zoology",
-    "plant-biology",
-    "microbiology",
-    "genetics-population",
-    "environmental-science",
-]
+# Actual bioRxiv category names (verify from API response)
+ECO_CATS = {"ecology", "evolutionary biology", "zoology", "plant biology"}
 
 
-def search_biorxiv(keyword: str, limit: int = 100, cursor: int = 0) -> list[dict]:
-    """Search bioRxiv by keyword via the details API with text search."""
-    # bioRxiv API uses date ranges. For text search, use the content_detail endpoint
-    url = f"https://api.biorxiv.org/details/biorxiv/2015-01-01/2026-12-31/{cursor}"
-    
+def fetch_month(start_date: str, end_date: str, cursor: int = 0) -> list[dict]:
+    """Fetch one page from bioRxiv API."""
+    url = f"{API}{start_date}/{end_date}/{cursor}"
     try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "EcoSeek/1.0",
-            "Accept": "application/json",
-        })
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=90) as resp:
             data = json.loads(resp.read())
     except Exception as e:
-        print(f"  API error ({cursor}): {e}", file=sys.stderr)
+        print(f"  API error: {e}", file=sys.stderr)
         return []
     
     results = []
-    papers = data.get("collection", [])
-    
-    keyword_lower = keyword.lower()
-    for paper in papers:
-        title = (paper.get("title") or "").lower()
-        abstract = (paper.get("abstract") or "").lower()
-        category = (paper.get("category") or "").lower()
-        
-        # Filter by keyword match and category
-        if keyword_lower not in title and keyword_lower not in abstract:
+    for paper in data.get("collection", []):
+        cat = (paper.get("category") or "").lower()
+        if cat not in ECO_CATS:
             continue
-        if category not in COLLECTIONS:
-            continue
-        
-        if len(paper.get("abstract") or "") < 100:
+        abstract = (paper.get("abstract") or "").strip()
+        if len(abstract) < 100:
             continue
         
         results.append({
             "pmid": f"biorxiv:{paper.get('doi', paper.get('paper_id', '?'))}",
             "title": (paper.get("title") or "").strip(),
-            "abstract": (paper.get("abstract") or "").strip(),
+            "abstract": abstract,
             "authors": (paper.get("authors") or "").strip(),
             "journal": f"bioRxiv ({paper.get('category', 'ecology')})",
             "pub_year": (paper.get("date") or "2025")[:4],
             "keywords": "",
-            "mesh_terms": f"biorxiv:{paper.get('category', '')}",
+            "mesh_terms": f"biorxiv:{cat}",
             "doi": paper.get("doi", ""),
         })
-        
-        if len(results) >= limit:
-            break
-    
     return results
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, default=100, help="Papers per keyword batch")
-    parser.add_argument("--keywords", type=str, default="ecology,conservation,biodiversity,climate,evolution,species,niche,population,community,ecosystem")
+    parser.add_argument("--limit", type=int, default=200, help="Max papers per month")
     parser.add_argument("--output", default="biorxiv_papers.jsonl")
+    parser.add_argument("--year-start", type=int, default=2020)
+    parser.add_argument("--year-end", type=int, default=2026)
     args = parser.parse_args()
     
-    keywords = [k.strip() for k in args.keywords.split(",")]
-    print(f"BIORXIV HARVEST: {len(keywords)} keywords × up to {args.limit} papers each")
-    print(f"Categories: {', '.join(COLLECTIONS)}")
+    print(f"BIORXIV HARVEST: {args.year_start}-{args.year_end}, max {args.limit}/month")
+    print(f"Categories: {ECO_CATS}")
     print()
     
     seen = set()
     all_papers = []
-    kw_counts = {}
     
-    for i, kw in enumerate(keywords):
-        batch = 0
+    current = datetime(args.year_start, 1, 1)
+    end = datetime(args.year_end, 12, 31)
+    
+    month_count = 0
+    while current <= end:
+        month_end = (current.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        s = current.strftime("%Y-%m-%d")
+        e = month_end.strftime("%Y-%m-%d")
+        
         collected = 0
-        max_batches = 3  # cursor pages per keyword
+        cursor = 0
+        batch_new = 0
         
-        print(f"  [{i+1}/{len(keywords)}] '{kw}'", end=" ", flush=True)
+        print(f"  {s} to {e}", end=" ", flush=True)
         
-        for cursor in range(0, max_batches * 100, 100):
-            papers = search_biorxiv(kw, limit=args.limit - collected, cursor=cursor)
-            new = [p for p in papers if p["pmid"] not in seen]
-            for p in new:
-                seen.add(p["pmid"])
-                p["topic"] = kw
-            all_papers.extend(new)
-            collected += len(new)
-            
-            if len(papers) < 100:  # no more results
+        while cursor < 300:  # max 3 pages per month
+            papers = fetch_month(s, e, cursor)
+            if not papers:
                 break
+            for p in papers:
+                if p["pmid"] not in seen:
+                    seen.add(p["pmid"])
+                    all_papers.append(p)
+                    collected += 1
+            cursor += 30
+            time.sleep(0.3)
             if collected >= args.limit:
                 break
-            time.sleep(0.5)
         
-        kw_counts[kw] = collected
-        print(f"→ {collected} papers")
+        print(f"→ {collected} new (total: {len(all_papers)})")
+        month_count += 1
+        
+        current = month_end + timedelta(days=1)
         time.sleep(0.5)
     
     with open(args.output, "w") as f:
@@ -131,10 +112,8 @@ def main():
             f.write(json.dumps(p, ensure_ascii=False) + "\n")
     
     print(f"\n{'='*50}")
-    print(f"BIORXIV COMPLETE: {len(all_papers)} papers")
+    print(f"BIORXIV COMPLETE: {len(all_papers)} papers from {month_count} months")
     print(f"  Output: {args.output}")
-    for kw, n in sorted(kw_counts.items(), key=lambda x: -x[1]):
-        print(f"    {kw:20s} {n:4d}")
 
 
 if __name__ == "__main__":
