@@ -1,5 +1,6 @@
-# Ollama endpoints — 9-node fleet (auto-updated)
-# deepseek-r1:14b on Q6000 GPUs
+# Ollama endpoints — Q6000 + MI210 hybrid fleet (11 nodes)
+# Q6000: Quadro RTX 6000 (24GB, ~40 tok/s)
+# MI210: AMD Instinct MI210 (64GB, ~66 tok/s)
 r22r05n01:43879
 r22r20n01:59321
 r22r15n01:36813
@@ -7,5 +8,7 @@ r22r25n01:41555
 r22r30n01:44877
 r22r35n01:46115
 r22r10n01:47973
-r15r05n01:59305
-r15r10n01:60583
+r08r30n01:47313
+r08r30n01:35803
+r08r18n01:58415
+r08r18n01:37383
