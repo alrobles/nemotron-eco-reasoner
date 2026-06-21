@@ -355,6 +355,21 @@ def main():
     print(f"  Timeout:    {args.timeout}s")
     print(f"{'='*60}")
 
+    # Pre-warm all endpoints (load model into GPU memory)
+    print("Pre-warming endpoints...")
+    import urllib.request as _ur
+    for ep in endpoints:
+        try:
+            _ur.urlopen(_ur.Request(
+                f"http://{ep}/api/generate",
+                data=json.dumps({"model": model, "prompt": "test", "stream": False,
+                                "options": {"num_predict": 1}}).encode(),
+                headers={"Content-Type": "application/json"}), timeout=120)
+            print(f"  {ep} ✓")
+        except Exception as e:
+            print(f"  {ep} ✗ ({e})")
+    print(f"Warm-up complete.\n")
+
     # Prepare tasks: round-robin assignment to endpoints
     tasks = []
     for i, paper in enumerate(papers):
