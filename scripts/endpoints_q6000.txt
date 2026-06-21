@@ -1,11 +1,11 @@
-# Ollama endpoints — 9-node fleet
+# Ollama endpoints — 9-node fleet (auto-updated)
 # deepseek-r1:14b on Q6000 GPUs
 r22r05n01:43879
 r22r20n01:59321
 r22r15n01:36813
 r22r25n01:41555
 r22r30n01:44877
-r22r35n01:53955
+r22r35n01:46115
 r22r10n01:47973
 r15r05n01:59305
 r15r10n01:60583
