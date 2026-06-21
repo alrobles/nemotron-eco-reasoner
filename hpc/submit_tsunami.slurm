@@ -11,7 +11,7 @@
 #   Or with custom concurrency: sbatch --array=1-N%30 submit_tsunami.slurm
 
 #SBATCH --job-name=cot-tsunami
-#SBATCH --partition=sixhour,gpu
+#SBATCH --partition=sixhour
 #SBATCH --time=05:00:00
 #SBATCH --mem=20G
 #SBATCH --cpus-per-task=4
