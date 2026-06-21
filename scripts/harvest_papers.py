@@ -1,26 +1,12 @@
 #!/usr/bin/env python3
 """
-harvest_papers.py — Query the PubMed FTS5 index for ecological papers
-across multiple subdomains, deduplicate, and save as JSONL.
-
-Extends the paper pool beyond SDM (4,402 papers) to cover:
-- Population & community ecology
-- Conservation & biodiversity  
-- Movement & spatial ecology
-- Climate change impacts
-- Phylogenetic ecology
-- Macroecology & biogeography
-- Ecological statistics & methods
-- Invasion biology
-- Ecosystem ecology
-- Disease ecology
-- Urban ecology
-- GBIF / biodiversity informatics
+harvest_papers.py — Parallel PubMed FTS5 paper harvest across ecological subdomains.
+Queries multiple topics concurrently using ThreadPoolExecutor.
 
 Usage:
-    python3 harvest_papers.py --limit 500 --output new_papers.jsonl
+    python3 harvest_papers.py --limit 500 --workers 8 --output eco_papers.jsonl
 
-Requires the PubMed FTS5 index at /home/a474r867/work/pubmed/index/pubmed_fts.db
+Requires: PubMed FTS5 index at /home/a474r867/work/pubmed/index/pubmed_fts.db
 """
 
 import argparse
@@ -29,74 +15,84 @@ import os
 import sqlite3
 import sys
 import time
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 DB_PATH = "/home/a474r867/work/pubmed/index/pubmed_fts.db"
 
 TOPICS = [
     # Population & community ecology
-    ("population dynamics density dependence", "pop_dynamics"),
-    ("community assembly functional diversity coexistence", "community"),
-    ("trophic cascade food web network stability", "foodweb"),
+    ("population dynamics density dependence regulation", "pop_dynamics"),
+    ("community assembly functional diversity trait convergence", "community"),
+    ("trophic cascade food web network stability interaction", "foodweb"),
     
     # Conservation & biodiversity
-    ("conservation planning protected area prioritization Zonation", "conservation"),
-    ("extinction risk IUCN Red List threatened species", "extinction"),
-    ("biodiversity monitoring indicator essential biodiversity variable", "biodiv_monitor"),
+    ("conservation planning protected area prioritization systematic", "conservation"),
+    ("extinction risk IUCN Red List threatened assessment", "extinction"),
+    ("biodiversity monitoring indicator essential variable sampling", "biodiv_monitor"),
     
-    # Movement & spatial ecology  
-    ("animal movement telemetry home range step selection", "movement"),
-    ("dispersal kernel seed dispersal connectivity landscape", "dispersal"),
-    ("spatial ecology point pattern analysis Ripley", "spatial"),
+    # Movement & spatial ecology
+    ("animal movement telemetry home range step selection function", "movement"),
+    ("dispersal kernel seed dispersal connectivity corridor landscape", "dispersal"),
+    ("spatial point pattern analysis Ripley K inhomogeneous", "spatial"),
     
     # Climate change
-    ("climate change range shift phenology mismatch", "climate"),
-    ("thermal tolerance physiological limit acclimation", "thermal"),
+    ("climate change range shift phenological mismatch adaptation", "climate"),
+    ("thermal tolerance physiological limit acclimation heat stress", "thermal"),
+    ("climate velocity refugia microclimate buffering", "microclimate"),
     
     # Phylogenetic ecology
-    ("phylogenetic comparative method trait evolution PGLS", "phylo"),
-    ("phylogenetic diversity community phylogenetics", "phylo_div"),
+    ("phylogenetic comparative method trait evolution Brownian Ornstein", "phylo"),
+    ("phylogenetic diversity community structure phylogenetic signal", "phylo_div"),
     
     # Macroecology
-    ("species richness latitudinal gradient macroecological pattern", "macroeco"),
-    ("species abundance distribution metabolic theory ecology", "metabolic"),
+    ("species richness latitudinal diversity gradient macroecological", "macroeco"),
+    ("species abundance distribution metabolic theory body size", "metabolic"),
+    ("beta diversity turnover nestedness distance decay similarity", "beta_div"),
     
-    # Ecological statistics
-    ("occupancy detection probability hierarchical model", "occupancy"),
-    ("integrated population model mark recapture", "ipm"),
-    ("joint species distribution model hierarchical Bayesian", "jsdm"),
-    ("generalized additive model ecological nonlinear", "gam"),
+    # Ecological statistics & methods
+    ("occupancy model detection probability imperfect sampling site", "occupancy"),
+    ("integrated population model mark recapture state space", "ipm"),
+    ("joint species distribution model hierarchical Bayesian latent", "jsdm"),
+    ("generalized additive model spline ecological nonlinear smooth", "gam"),
     
     # Invasion biology
-    ("invasive species impact native community biotic resistance", "invasion"),
-    ("introduced species naturalization invasion hypothesis", "intro"),
+    ("invasive species impact native community biotic resistance enemy", "invasion"),
+    ("introduced species naturalization invasion hypothesis propagule", "intro"),
     
     # Ecosystem ecology
-    ("ecosystem function biodiversity experiment productivity", "ecosystem"),
-    ("carbon sequestration forest biomass remote sensing", "carbon"),
-    ("nutrient cycling decomposition litter soil ecology", "nutrient"),
+    ("ecosystem function biodiversity experiment productivity stability", "ecosystem"),
+    ("carbon sequestration forest biomass LiDAR remote sensing", "carbon"),
+    ("nutrient cycling decomposition litter stoichiometry microbial", "nutrient"),
     
     # Disease ecology
     ("disease ecology zoonotic spillover dilution effect biodiversity", "disease"),
-    ("host parasite coevolution transmission network", "parasite"),
+    ("host parasite coevolution virulence transmission evolution", "parasite"),
+    ("vector borne disease climate land use change ecological", "vector"),
     
-    # Urban ecology
-    ("urbanization biodiversity homogenization gradient", "urban"),
+    # Urban & human ecology
+    ("urbanization biodiversity homogenization gradient land cover", "urban"),
+    ("ecosystem service valuation natural capital nature contribution", "ecoservice"),
     
     # GBIF / biodiversity informatics
-    ("species occurrence data GBIF sampling bias citizen science", "gbif"),
-    ("biodiversity informatics data quality completeness", "informatics"),
-    ("citizen science iNaturalist eBird data integration", "citizen_sci"),
+    ("species occurrence data GBIF sampling bias correction citizen", "gbif"),
+    ("biodiversity informatics data quality completeness uncertainty", "informatics"),
+    ("citizen science iNaturalist eBird observer effort detection", "citizen_sci"),
     ("species distribution model MaxEnt overfitting spatial autocorrelation", "sdm_methods"),
+    
+    # Freshwater & marine
+    ("stream macroinvertebrate bioassessment water quality index", "freshwater"),
+    ("marine biodiversity coral reef fish biomass pelagic", "marine"),
+    
+    # Pollination & plant ecology
+    ("pollination network plant pollinator mutualism specialization", "pollination"),
+    ("plant functional trait leaf economic spectrum wood density", "plant_traits"),
 ]
 
 
 def search_pubmed(query: str, limit: int = 500, year_min: int = 2015) -> list[dict]:
-    """Query PubMed FTS5 and return papers with metadata."""
-    if not os.path.exists(DB_PATH):
-        sys.exit(f"FTS index not found: {DB_PATH}")
-    
-    conn = sqlite3.connect(DB_PATH, timeout=60)
+    """Query PubMed FTS5. Thread-safe: opens its own connection."""
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=120)
     conn.row_factory = sqlite3.Row
     
     sql = """
@@ -116,49 +112,98 @@ def search_pubmed(query: str, limit: int = 500, year_min: int = 2015) -> list[di
     return results
 
 
+def fetch_topic(args):
+    """Fetch papers for one topic. Returns (label, papers, error)."""
+    query, label, limit = args
+    try:
+        papers = search_pubmed(query, limit=limit)
+        return (label, papers, None)
+    except Exception as e:
+        return (label, [], str(e))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=500, help="Max papers per topic")
-    parser.add_argument("--output", default="new_papers.jsonl")
-    parser.add_argument("--topics", help="Comma-separated topic labels (by index or name)")
+    parser.add_argument("--workers", type=int, default=8, help="Concurrent FTS5 queries")
+    parser.add_argument("--output", default="eco_papers_extra.jsonl")
+    parser.add_argument("--topics", help="Comma-separated topic labels to filter")
     args = parser.parse_args()
     
     if not os.path.exists(DB_PATH):
         sys.exit(f"ERROR: FTS5 index not found at {DB_PATH}")
     
-    print(f"Harvesting papers from {len(TOPICS)} ecological topics...")
-    print(f"Max {args.limit} papers per topic, year >= 2015")
+    # Filter topics if specified
+    topics = TOPICS
+    if args.topics:
+        wanted = set(args.topics.split(","))
+        topics = [(q, l) for q, l in TOPICS if l in wanted]
     
-    seen_pmids = set()
+    print(f"PARALLEL HARVEST: {len(topics)} topics × {args.limit} papers, {args.workers} workers")
+    print(f"Database: {DB_PATH} ({os.path.getsize(DB_PATH)/1e9:.1f} GB)")
+    print()
+    
+    tasks = [(q, l, args.limit) for q, l in topics]
+    topic_results = {}  # label -> list of papers
+    errors = []
+    t_start = time.time()
+    
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = {pool.submit(fetch_topic, t): t[1] for t in tasks}
+        
+        for i, fut in enumerate(as_completed(futures)):
+            label = futures[fut]
+            try:
+                lbl, papers, err = fut.result()
+                if err:
+                    errors.append((lbl, err))
+                    print(f"  [{i+1}/{len(topics)}] {lbl:25s} ERROR: {err[:60]}")
+                else:
+                    topic_results[lbl] = papers
+                    print(f"  [{i+1}/{len(topics)}] {lbl:25s} → {len(papers):5d} papers")
+            except Exception as e:
+                errors.append((label, str(e)))
+                print(f"  [{i+1}/{len(topics)}] {label:25s} CRASH: {e}")
+    
+    elapsed = time.time() - t_start
+    
+    # ── Deduplicate across topics ──
+    seen = set()
     all_papers = []
-    topic_counts = {}
+    topic_final = {}
     
-    for i, (query, label) in enumerate(TOPICS):
-        print(f"  [{i+1}/{len(TOPICS)}] {label}: '{query[:60]}...'", end=" ", flush=True)
-        try:
-            papers = search_pubmed(query, limit=args.limit)
-            new = [p for p in papers if p["pmid"] not in seen_pmids]
-            for p in new:
-                seen_pmids.add(p["pmid"])
+    for label, papers in topic_results.items():
+        new = []
+        for p in papers:
+            if p["pmid"] not in seen:
+                seen.add(p["pmid"])
                 p["topic"] = label
-            all_papers.extend(new)
-            topic_counts[label] = len(new)
-            print(f"→ {len(new)} new (total unique: {len(seen_pmids)})")
-        except Exception as e:
-            print(f"ERROR: {e}")
-        time.sleep(0.2)  # Gentle on the DB
+                new.append(p)
+        topic_final[label] = len(new)
+        all_papers.extend(new)
     
-    # Save
+    # ── Write output ──
     with open(args.output, "w") as f:
         for p in all_papers:
             f.write(json.dumps(p, ensure_ascii=False) + "\n")
     
-    print(f"\n{'='*50}")
-    print(f"TOTAL: {len(all_papers)} unique papers ({len(seen_pmids)} total)")
-    print(f"Output: {args.output}")
-    print(f"\nBy topic:")
-    for label, count in sorted(topic_counts.items(), key=lambda x: -x[1]):
-        print(f"  {label:20s} {count:5d} papers")
+    # ── Report ──
+    print(f"\n{'='*60}")
+    print(f"HARVEST COMPLETE in {elapsed:.1f}s ({elapsed/60:.1f} min)")
+    print(f"  Topics:       {len(topics)} ({len(topic_results)} ok, {len(errors)} failed)")
+    print(f"  Total papers: {len(all_papers)} unique (from {sum(len(v) for v in topic_results.values())} raw)")
+    print(f"  Output:       {args.output}")
+    print(f"  Rate:         {len(all_papers)/max(elapsed,1)*60:.0f} papers/min")
+    
+    if errors:
+        print(f"\n  Errors ({len(errors)}):")
+        for lbl, err in errors:
+            print(f"    {lbl}: {err[:80]}")
+    
+    print(f"\n  Top 10 topics:")
+    for label, count in sorted(topic_final.items(), key=lambda x: -x[1])[:10]:
+        bar = "█" * min(50, count // 10)
+        print(f"    {label:25s} {count:5d} {bar}")
 
 
 if __name__ == "__main__":
