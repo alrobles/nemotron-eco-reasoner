@@ -4,25 +4,21 @@
 #SBATCH --time=05:55:00
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:pro6000:1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --output=/home/a474r867/scratch/eco_train_v2_%j.out
 #SBATCH --error=/home/a474r867/scratch/eco_train_v2_%j.err
 
 # eco_train_v2.slurm — Two-phase ecological reasoning trainer
-# Incorporates 3rd place (0.900) + VCDAD silver techniques:
-#   - Two-phase (Train->Nudge)
-#   - NEFTune embedding noise
-#   - Stratified sampling by ecological method
-#   - Pure BF16 + LoRA fp32
-#   - MoE gradient-sum tying (3rd place)
-#   - Completion-only loss
-#   - lm_head in LoRA targets
+# Incorporates 3rd place (0.900) + VCDAD silver techniques
 #
-# Default: 1x PRO6000 (96GB) — matches 3rd place hardware
-# For MI210 (2x GPU, ROCm): needs ROCm torch venv
-#   sbatch --gres=gpu:mi210:2 --ntasks=2 --ntasks-per-node=2 hpc/eco_train_v2.slurm
+# Default: 1x A100 (80GB) — BF16 native, torch 2.5.1+cu121 compatible
+#
+# GPU overrides:
+#   A100 2x:    sbatch --gres=gpu:a100:2 --ntasks=2 --ntasks-per-node=2 hpc/eco_train_v2.slurm
+#   PRO6000:    sbatch --gres=gpu:pro6000:1 --export=ALL,VENV_PATH=.../blackwell-venv hpc/eco_train_v2.slurm
+#   MI210 2x:   sbatch --gres=gpu:mi210:2 --ntasks=2 --ntasks-per-node=2 --export=ALL,VENV_PATH=.../rocm-venv hpc/eco_train_v2.slurm
 
 set -euo pipefail
 
@@ -43,26 +39,31 @@ LR=${LR:-2e-4}
 NUDGE_LR=${NUDGE_LR:-5e-6}
 NUDGE_FRAC=${NUDGE_FRAC:-0.3}
 NEFTUNE_ALPHA=${NEFTUNE_ALPHA:-5.0}
+VENV_PATH=${VENV_PATH:-/home/a474r867/scratch/ecocoder-training/venv}
 
-echo "== ECO TRAIN V2 (PRO6000) =="
+echo "== ECO TRAIN V2 =="
 echo "  Job: $SLURM_JOB_ID on $(hostname)"
 echo "  GPUs: $(echo $CUDA_VISIBLE_DEVICES 2>/dev/null || echo 'N/A')"
 echo "  Data: $DATA_PATH"
 echo "  Output: $OUT_PATH"
-echo "  Target: $TARGET_TOTAL steps"
+echo "  Target: $TARGET_TOTAL steps ($STEPS_PER_JOB per job)"
 echo "  Phase1: lr=$LR (no clipping)"
 echo "  Phase2: lr=$NUDGE_LR (frac=$NUDGE_FRAC)"
 echo "  NEFTune: alpha=$NEFTUNE_ALPHA"
 echo "  SeqLen: $SEQ_LEN"
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || true
+echo "  Venv: $VENV_PATH"
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || \
+  rocm-smi --showproductname 2>/dev/null || echo "  GPU info unavailable"
 date
 
-# Activate venv (ecocoder-training has torch 2.5.1+cu121, peft, trl, datasets)
-source /home/a474r867/scratch/ecocoder-training/venv/bin/activate 2>/dev/null || true
-set -euo pipefail
+# Activate venv
+source "$VENV_PATH/bin/activate" 2>/dev/null || {
+    echo "ERROR: venv not found at $VENV_PATH"
+    exit 1
+}
 
 echo "Python: $(python3 --version)"
-echo "Torch: $(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'MISSING')"
+echo "Torch: $(python3 -c 'import torch; print(torch.__version__, "CUDA" if torch.cuda.is_available() else "CPU")' 2>/dev/null || echo 'MISSING')"
 
 # AMD/ROCm settings (for MI210 runs)
 if command -v rocminfo &>/dev/null; then
@@ -85,7 +86,7 @@ fi
 
 echo "Data records: $(wc -l < "$DATA_PATH")"
 
-# DDP env (single GPU: RANK=0, WORLD_SIZE=1)
+# DDP env
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29500
 
@@ -105,7 +106,7 @@ echo "== DONE: exit=$EXIT at $(date) =="
 # Auto-resubmit if not done
 if grep -q "NEED_RESUBMIT" /home/a474r867/scratch/eco_train_v2_${SLURM_JOB_ID}.out 2>/dev/null; then
     echo "Auto-resubmitting..."
-    sbatch --export=ALL,DATA_PATH=$DATA_PATH,OUT_PATH=$OUT_PATH,TARGET_TOTAL=$TARGET_TOTAL,STEPS_PER_JOB=$STEPS_PER_JOB $R/hpc/eco_train_v2.slurm
+    sbatch --export=ALL,DATA_PATH=$DATA_PATH,OUT_PATH=$OUT_PATH,TARGET_TOTAL=$TARGET_TOTAL,STEPS_PER_JOB=$STEPS_PER_JOB,VENV_PATH=$VENV_PATH $R/hpc/eco_train_v2.slurm
     echo "RESUBMITTED"
 fi
 
