@@ -184,12 +184,21 @@ def fmt(ex):
 ds = ds.map(fmt)
 
 OUT = "/tmp/smoke_train_out"
-config = SFTConfig(
-    output_dir=OUT, max_steps=3, per_device_train_batch_size=1,
-    gradient_accumulation_steps=1, learning_rate=2e-4, bf16=True,
-    logging_steps=1, save_steps=3, max_seq_length=512,
-    dataset_text_field="text", report_to="none",
-)
+try:
+    config = SFTConfig(
+        output_dir=OUT, max_steps=3, per_device_train_batch_size=1,
+        gradient_accumulation_steps=1, learning_rate=2e-4, bf16=True,
+        logging_steps=1, save_steps=3, max_seq_length=512,
+        dataset_text_field="text", report_to="none",
+    )
+except TypeError:
+    # trl >= 1.5: max_seq_length removed, use TrainingArguments style
+    from transformers import TrainingArguments
+    config = SFTConfig(
+        output_dir=OUT, max_steps=3, per_device_train_batch_size=1,
+        gradient_accumulation_steps=1, learning_rate=2e-4, bf16=True,
+        logging_steps=1, save_steps=3, report_to="none",
+    )
 trainer = SFTTrainer(model=model, args=config, train_dataset=ds, processing_class=tok)
 
 t0 = time.time()
