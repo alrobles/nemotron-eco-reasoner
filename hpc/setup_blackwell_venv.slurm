@@ -19,14 +19,25 @@ echo "Node: $(hostname)"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null || true
 date
 
+# Check for newer Python via modules
+module load python/3.12 2>/dev/null || module load python/3.11 2>/dev/null || module load python/3.10 2>/dev/null || true
+PYTHON=$(command -v python3.12 2>/dev/null || command -v python3.11 2>/dev/null || command -v python3.10 2>/dev/null || command -v python3)
+echo "Using Python: $PYTHON ($($PYTHON --version))"
+
 # Clean slate
 rm -rf "$VENV"
-python3 -m venv --without-pip "$VENV"
+$PYTHON -m venv "$VENV"
 source "$VENV/bin/activate"
 
-# Bootstrap pip (Python 3.9 bundled pip has broken resolvelib)
-curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
-python3 /tmp/get-pip.py 2>&1 | tail -3
+# Upgrade pip (use pip3.9-compatible bootstrap if system python is old)
+PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+if python3 -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)"; then
+    pip install --upgrade pip 2>&1 | tail -3
+else
+    # Python 3.9: get-pip.py dropped 3.9 support, use version-pinned bootstrap
+    curl -sS https://bootstrap.pypa.io/pip/3.9/get-pip.py -o /tmp/get-pip-39.py
+    python3 /tmp/get-pip-39.py 2>&1 | tail -3
+fi
 echo "pip: $(pip --version)"
 
 # Install torch nightly with CUDA 12.8 (Blackwell support)
