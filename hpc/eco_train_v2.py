@@ -370,9 +370,9 @@ cfg = SFTConfig(
     weight_decay=0.0,
     max_grad_norm=1e9,  # Phase 1: clipping OFF (from VCDAD silver solution)
     neftune_noise_alpha=NEFTUNE_ALPHA,  # NEFTune embedding noise (from VCDAD)
-    use_liger_kernel=True,
+    use_liger_kernel=False,  # liger may not be installed in all venvs
     ddp_find_unused_parameters=True,
-    dataloader_num_workers=2,
+    dataloader_num_workers=0,  # 0 avoids /dev/shm Bus error on HPC nodes
     seed=42,
 )
 
