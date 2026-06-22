@@ -110,14 +110,15 @@ log(f"  lora_fp32={bool(LORA_FP32)}, completion_only={bool(COMPLETION_ONLY)}, lm
 # --------------------------------------------------------------------------- model
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-tok = AutoTokenizer.from_pretrained(M, trust_remote_code=True)
+tok = AutoTokenizer.from_pretrained(M, trust_remote_code=True, local_files_only=True)
 if tok.pad_token is None:
     tok.pad_token = tok.eos_token
 
 t0 = time.time()
 model = AutoModelForCausalLM.from_pretrained(
     M, trust_remote_code=True, dtype=torch.bfloat16,
-    device_map={"": LOCAL_RANK}, low_cpu_mem_usage=True)
+    device_map={"": LOCAL_RANK}, low_cpu_mem_usage=True,
+    local_files_only=True)
 model.config.use_cache = False
 log(f"MODEL LOADED in {time.time()-t0:.0f}s on cuda:{LOCAL_RANK} "
     f"{torch.cuda.get_device_name(LOCAL_RANK)}")
