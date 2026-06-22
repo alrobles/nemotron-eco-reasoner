@@ -92,9 +92,9 @@ fi
 
 echo "Data records: $(wc -l < "$DATA_PATH")"
 
-# DDP env
+# DDP env — randomize port to avoid collisions with other jobs on same node
 export MASTER_ADDR=$(hostname)
-export MASTER_PORT=29500
+export MASTER_PORT=$((10000 + RANDOM % 50000))
 
 # Export training vars
 export M DATA="$DATA_PATH" OUT="$OUT_PATH"
