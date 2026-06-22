@@ -165,9 +165,22 @@ for name, param in model.named_parameters():
         param.data = param.data.to(torch.float32)
 
 ds = load_dataset("json", data_files=DATA, split="train[:20]")
+print(f"Dataset: {len(ds)} examples, columns: {ds.column_names}")
 
+# Dataset uses 'messages' format (chat completions style)
 def fmt(ex):
-    return {"text": f"<extra_id_0>System\n{ex.get('system','')}\n<extra_id_1>User\n{ex['prompt']}\n<extra_id_1>Assistant\n{ex['response']}"}
+    msgs = ex.get("messages", [])
+    parts = []
+    for m in msgs:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        if role == "system":
+            parts.append(f"<extra_id_0>System\n{content}")
+        elif role == "user":
+            parts.append(f"<extra_id_1>User\n{content}")
+        elif role == "assistant":
+            parts.append(f"<extra_id_1>Assistant\n{content}")
+    return {"text": "\n".join(parts) if parts else "Hello world"}
 ds = ds.map(fmt)
 
 OUT = "/tmp/smoke_train_out"
