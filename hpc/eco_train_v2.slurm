@@ -4,25 +4,25 @@
 #SBATCH --time=05:55:00
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:mi210:2
-#SBATCH --ntasks=2
-#SBATCH --ntasks-per-node=2
+#SBATCH --gres=gpu:pro6000:1
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
 #SBATCH --output=/home/a474r867/scratch/eco_train_v2_%j.out
 #SBATCH --error=/home/a474r867/scratch/eco_train_v2_%j.err
 
 # eco_train_v2.slurm — Two-phase ecological reasoning trainer
-# Lessons from Kaggle Nemotron silver solutions:
-#   - Two-phase (Train→Nudge)
+# Incorporates 3rd place (0.900) + VCDAD silver techniques:
+#   - Two-phase (Train->Nudge)
 #   - NEFTune embedding noise
 #   - Stratified sampling by ecological method
-#   - Pure BF16 (MI210)
-#   - MoE weight tying
+#   - Pure BF16 + LoRA fp32
+#   - MoE gradient-sum tying (3rd place)
+#   - Completion-only loss
+#   - lm_head in LoRA targets
 #
-# Usage:
-#   sbatch hpc/eco_train_v2.slurm
-#   sbatch --export=ALL,DATA_PATH=...,OUT_PATH=... hpc/eco_train_v2.slurm
-#   # PRO6000 (single GPU, QLoRA not needed for BF16):
-#   sbatch --gres=gpu:pro6000:1 --ntasks=1 --ntasks-per-node=1 hpc/eco_train_v2.slurm
+# Default: 1x PRO6000 (96GB) — matches 3rd place hardware
+# For MI210 (2x GPU, ROCm): needs ROCm torch venv
+#   sbatch --gres=gpu:mi210:2 --ntasks=2 --ntasks-per-node=2 hpc/eco_train_v2.slurm
 
 set -euo pipefail
 
@@ -44,7 +44,7 @@ NUDGE_LR=${NUDGE_LR:-5e-6}
 NUDGE_FRAC=${NUDGE_FRAC:-0.3}
 NEFTUNE_ALPHA=${NEFTUNE_ALPHA:-5.0}
 
-echo "== ECO TRAIN V2 =="
+echo "== ECO TRAIN V2 (PRO6000) =="
 echo "  Job: $SLURM_JOB_ID on $(hostname)"
 echo "  GPUs: $(echo $CUDA_VISIBLE_DEVICES 2>/dev/null || echo 'N/A')"
 echo "  Data: $DATA_PATH"
@@ -54,13 +54,17 @@ echo "  Phase1: lr=$LR (no clipping)"
 echo "  Phase2: lr=$NUDGE_LR (frac=$NUDGE_FRAC)"
 echo "  NEFTune: alpha=$NEFTUNE_ALPHA"
 echo "  SeqLen: $SEQ_LEN"
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || true
 date
 
-# Activate venv
-source /home/a474r867/scratch/nemotron-venv/bin/activate 2>/dev/null || true
+# Activate venv (ecocoder-training has torch 2.5.1+cu121, peft, trl, datasets)
+source /home/a474r867/scratch/ecocoder-training/venv/bin/activate 2>/dev/null || true
 set -euo pipefail
 
-# AMD/ROCm settings
+echo "Python: $(python3 --version)"
+echo "Torch: $(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'MISSING')"
+
+# AMD/ROCm settings (for MI210 runs)
 if command -v rocminfo &>/dev/null; then
     export PYTORCH_HIP_ALLOC_CONF=expandable_segments:True
     export HSA_FORCE_FINE_GRAIN_PCIE=1
@@ -79,7 +83,9 @@ if [ ! -f "$DATA_PATH" ]; then
     python3 $R/scripts/filter_dataset.py --output "$DATA_PATH"
 fi
 
-# DDP env
+echo "Data records: $(wc -l < "$DATA_PATH")"
+
+# DDP env (single GPU: RANK=0, WORLD_SIZE=1)
 export MASTER_ADDR=$(hostname)
 export MASTER_PORT=29500
 
