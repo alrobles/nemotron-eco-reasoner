@@ -16,7 +16,7 @@ set -euo pipefail
 
 VENV=/home/a474r867/scratch/nemotron-blackwell-venv
 R=/home/a474r867/scratch/nemotron-eco-reasoner
-M=/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848
+export M=/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848
 
 echo "=== SMOKE TEST: PRO6000 BLACKWELL ==="
 echo "Node: $(hostname)"
@@ -54,13 +54,13 @@ print(f'Encode OK: {test.input_ids.shape}')
 
 echo ""
 echo "=== STEP 3: Load model (BF16, this is the big one) ==="
-python3 << 'PYEOF'
+python3 << PYEOF
 import torch, time, os
 
 t0 = time.time()
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-M = os.environ.get("M", "$M")
+M = os.environ["M"]
 print(f"Loading model from {M}...")
 
 model = AutoModelForCausalLM.from_pretrained(
@@ -90,12 +90,12 @@ PYEOF
 
 echo ""
 echo "=== STEP 4: LoRA setup + fp32 cast ==="
-python3 << 'PYEOF'
+python3 << PYEOF
 import torch, os
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import LoraConfig, get_peft_model
 
-M = os.environ.get("M", "$M")
+M = os.environ["M"]
 model = AutoModelForCausalLM.from_pretrained(
     M, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True
 )
