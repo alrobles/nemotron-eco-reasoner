@@ -17,6 +17,9 @@ set -euo pipefail
 VENV=/home/a474r867/scratch/nemotron-blackwell-venv
 R=/home/a474r867/scratch/nemotron-eco-reasoner
 export M=/home/a474r867/scratch/nemotron-model-cache/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-BF16/snapshots/cbd3fa9f933d55ef16a84236559f4ee2a0526848
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_HOME=/home/a474r867/scratch/nemotron-model-cache
 
 echo "=== SMOKE TEST: PRO6000 BLACKWELL ==="
 echo "Node: $(hostname)"
@@ -31,7 +34,7 @@ echo "Python: $(python3 --version)"
 echo "Torch: $(python3 -c 'import torch; print(torch.__version__, "cuda" if torch.cuda.is_available() else "cpu")')"
 echo "GPU: $(python3 -c 'import torch; print(torch.cuda.get_device_name(0))')"
 echo "Arch: $(python3 -c 'import torch; c=torch.cuda.get_device_capability(0); print(f"sm_{c[0]}{c[1]}")')"
-echo "VRAM: $(python3 -c 'import torch; print(f"{torch.cuda.get_device_properties(0).total_mem/1e9:.1f} GB")')"
+echo "VRAM: $(python3 -c 'import torch; p=torch.cuda.get_device_properties(0); m=getattr(p,"total_memory",None) or getattr(p,"total_mem",0); print(f"{m/1e9:.1f} GB")')"
 
 echo ""
 echo "=== STEP 1: BF16 kernel test ==="
@@ -64,7 +67,7 @@ M = os.environ["M"]
 print(f"Loading model from {M}...")
 
 model = AutoModelForCausalLM.from_pretrained(
-    M, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True
+    M, dtype=torch.bfloat16, device_map="auto", trust_remote_code=True, local_files_only=True
 )
 load_time = time.time() - t0
 print(f"Model loaded in {load_time:.1f}s")
@@ -97,7 +100,7 @@ from peft import LoraConfig, get_peft_model
 
 M = os.environ["M"]
 model = AutoModelForCausalLM.from_pretrained(
-    M, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True
+    M, dtype=torch.bfloat16, device_map="auto", trust_remote_code=True, local_files_only=True
 )
 
 # Architecture-aware LoRA targets (3rd place config)
