@@ -21,6 +21,9 @@ wandb/
 
 # Note: training_logs/ IS tracked — permanent record of every attempt.
 # Note: data/*.jsonl IS tracked (small datasets for reproduction).
+# Exception: balanced_train*.jsonl is too large (~93MB) for git
+data/balanced_train.jsonl
+data/balanced_train_meta.jsonl
 *.sif
 build-error.log
 build-loop.sh
