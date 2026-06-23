@@ -78,6 +78,9 @@ if command -v rocminfo &>/dev/null; then
     echo "  ROCm detected: PYTORCH_HIP_ALLOC_CONF=$PYTORCH_HIP_ALLOC_CONF"
 fi
 
+# CUDA memory fragmentation fix — avoids OOM from non-contiguous allocations
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 # CUDA wheels (Mamba SSM kernels)
 export LD_LIBRARY_PATH="/home/a474r867/scratch/wheels:${LD_LIBRARY_PATH:-}"
 
