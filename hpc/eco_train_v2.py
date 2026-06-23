@@ -270,7 +270,42 @@ RESUME = os.path.dirname(ckpts[-1]) if ckpts else None
 global_step = json.load(open(ckpts[-1])).get("global_step", 0) if ckpts else 0
 batch_steps = min(STEPS_PER_JOB, TARGET_TOTAL - global_step)
 target_step = global_step + batch_steps
-log(f"RESUME step {global_step} -> {target_step}" if RESUME else f"FRESH START -> {target_step}")
+
+# Manual adapter load: bypass PEFT's broken resume_from_checkpoint path
+# (avoids WeightConverter 'distributed_operation' TypeError)
+MANUAL_RESUME = False
+STEP_OFFSET = 0
+if RESUME:
+    adapter_sf = os.path.join(RESUME, "adapter_model.safetensors")
+    adapter_bin = os.path.join(RESUME, "adapter_model.bin")
+    adapter_path = adapter_sf if os.path.exists(adapter_sf) else (
+        adapter_bin if os.path.exists(adapter_bin) else None)
+    if adapter_path:
+        try:
+            if adapter_path.endswith(".safetensors"):
+                from safetensors.torch import load_file
+                state = load_file(adapter_path, device=f"cuda:{LOCAL_RANK}")
+            else:
+                state = torch.load(adapter_path, map_location=f"cuda:{LOCAL_RANK}")
+            incomp = model.load_state_dict(state, strict=False)
+            log(f"MANUAL ADAPTER LOAD from {os.path.basename(RESUME)}: "
+                f"loaded={len(state)} tensors, missing={len(incomp.missing_keys)}, "
+                f"unexpected={len(incomp.unexpected_keys)}")
+            MANUAL_RESUME = True
+            STEP_OFFSET = global_step
+        except Exception as e:
+            log(f"WARNING: manual adapter load failed: {e}")
+            log("Falling back to native trainer resume")
+    else:
+        log(f"WARNING: no adapter weights found in {RESUME}")
+
+if MANUAL_RESUME:
+    log(f"MANUAL RESUME step {global_step} -> {target_step} (offset={STEP_OFFSET})")
+    RESUME = None  # disable native resume since we loaded weights manually
+elif RESUME:
+    log(f"NATIVE RESUME step {global_step} -> {target_step}")
+else:
+    log(f"FRESH START -> {target_step}")
 
 # --------------------------------------------------------- staged freeze callback
 from transformers import TrainerCallback
@@ -312,14 +347,16 @@ class TwoPhaseCallback(TrainerCallback):
     Phase 1: high LR, no gradient clipping
     Phase 2: low LR (nudge), gradient clipping ON, cosine schedule
     """
-    def __init__(self, nudge_start, nudge_lr, phase1_lr):
+    def __init__(self, nudge_start, nudge_lr, phase1_lr, step_offset=0):
         self.nudge_start = nudge_start
         self.nudge_lr = nudge_lr
         self.phase1_lr = phase1_lr
+        self.step_offset = step_offset
         self.switched = False
 
     def on_step_begin(self, args, state, control, **kw):
-        if not self.switched and state.global_step >= self.nudge_start:
+        real_step = state.global_step + self.step_offset
+        if not self.switched and real_step >= self.nudge_start:
             self.switched = True
             # Switch to nudge LR
             optimizer = kw.get("optimizer")
@@ -336,7 +373,7 @@ class TwoPhaseCallback(TrainerCallback):
                 print(f"{'='*60}\n", flush=True)
         return control
 
-callbacks.append(TwoPhaseCallback(nudge_start, NUDGE_LR, LR))
+callbacks.append(TwoPhaseCallback(nudge_start, NUDGE_LR, LR, step_offset=STEP_OFFSET))
 log(f"Two-phase: Phase1 steps 0-{nudge_start}, Phase2 steps {nudge_start}-{TARGET_TOTAL}")
 
 # ------------------------------------------------------------------- SFT training
@@ -345,9 +382,16 @@ from trl import SFTTrainer, SFTConfig
 warmup_steps = min(30, max(1, target_step // 10))
 eff_batch = 1 * GRAD_ACCUM * WORLD_SIZE
 
+# When using manual resume, train for batch_steps only (trainer starts from step 0)
+cfg_max_steps = batch_steps if MANUAL_RESUME else target_step
+# Use a sub-directory for Phase 2 intermediate checkpoints to avoid overwriting Phase 1
+cfg_output_dir = os.path.join(OUT, f"phase2_from_{global_step}") if MANUAL_RESUME else OUT
+if MANUAL_RESUME:
+    os.makedirs(cfg_output_dir, exist_ok=True)
+
 cfg = SFTConfig(
-    output_dir=OUT,
-    max_steps=target_step,
+    output_dir=cfg_output_dir,
+    max_steps=cfg_max_steps,
     per_device_train_batch_size=1,
     gradient_accumulation_steps=GRAD_ACCUM,
     learning_rate=LR,
@@ -414,7 +458,15 @@ log(f"  Phase2: lr={NUDGE_LR}, clipping=1.0, steps {nudge_start}-{TARGET_TOTAL}"
 log(f"  NEFTune alpha={NEFTUNE_ALPHA}")
 
 t0 = time.time()
-trainer.train(resume_from_checkpoint=RESUME)
+try:
+    trainer.train(resume_from_checkpoint=RESUME)
+except TypeError as e:
+    if "distributed_operation" in str(e) or "WeightConverter" in str(e):
+        log(f"PEFT resume bug hit: {e}")
+        log("Native resume failed — use manual adapter load (already handled above).")
+        log("If this fires, the manual load path was skipped. Aborting.")
+        sys.exit(1)
+    raise
 elapsed = (time.time() - t0) / 60
 final_loss = next((e["loss"] for e in reversed(trainer.state.log_history) if "loss" in e), "?")
 log(f"DONE {elapsed:.1f}min loss={final_loss}")
