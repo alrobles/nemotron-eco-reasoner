@@ -272,7 +272,8 @@ batch_steps = min(STEPS_PER_JOB, TARGET_TOTAL - global_step)
 target_step = global_step + batch_steps
 
 # Manual adapter load: bypass PEFT's broken resume_from_checkpoint path
-# (avoids WeightConverter 'distributed_operation' TypeError)
+# (avoids WeightConverter 'distributed_operation' TypeError in PEFT + torch nightly)
+# Strategy: direct parameter-level copy — bypasses ALL PEFT loading machinery
 MANUAL_RESUME = False
 STEP_OFFSET = 0
 if RESUME:
@@ -282,72 +283,58 @@ if RESUME:
         adapter_bin if os.path.exists(adapter_bin) else None)
     if adapter_path:
         try:
-            # Load to CPU first to avoid doubling GPU memory
+            # Load checkpoint to CPU (avoid doubling GPU memory)
             if adapter_path.endswith(".safetensors"):
                 from safetensors.torch import load_file
-                state = load_file(adapter_path, device="cpu")
+                ckpt_state = load_file(adapter_path, device="cpu")
             else:
-                state = torch.load(adapter_path, map_location="cpu")
-            log(f"Loaded {len(state)} tensors from {os.path.basename(adapter_path)}")
+                ckpt_state = torch.load(adapter_path, map_location="cpu")
+            log(f"Loaded {len(ckpt_state)} tensors from {os.path.basename(adapter_path)}")
 
-            # Method 1: PEFT set_peft_model_state_dict (handles key prefix mapping)
-            try:
-                from peft import set_peft_model_state_dict
-                set_peft_model_state_dict(model, state)
-                log(f"MANUAL ADAPTER LOAD via set_peft_model_state_dict: "
-                    f"{len(state)} tensors from {os.path.basename(RESUME)}")
+            # Build key mapping: checkpoint uses stripped keys, model has full keys
+            # PEFT save_pretrained strips 'base_model.model.' prefix
+            model_params = dict(model.named_parameters())
+            loaded_count = 0
+            skipped = []
+            for ck, cv in ckpt_state.items():
+                # Try multiple key mappings
+                candidates = [
+                    ck,
+                    f"base_model.model.{ck}",
+                ]
+                if ck.startswith("base_model.model."):
+                    candidates.append(ck[len("base_model.model."):])
+
+                matched_key = None
+                for mk in candidates:
+                    if mk in model_params:
+                        matched_key = mk
+                        break
+
+                if matched_key is not None:
+                    param = model_params[matched_key]
+                    param.data.copy_(cv.to(param.device, dtype=param.dtype))
+                    loaded_count += 1
+                else:
+                    skipped.append(ck)
+
+            log(f"DIRECT PARAM COPY from {os.path.basename(RESUME)}: "
+                f"{loaded_count}/{len(ckpt_state)} tensors loaded")
+            if skipped:
+                log(f"  skipped {len(skipped)} keys (first 3: {skipped[:3]})")
+            if loaded_count > 100:
                 MANUAL_RESUME = True
                 STEP_OFFSET = global_step
-            except Exception as e_peft:
-                log(f"set_peft_model_state_dict failed: {e_peft}")
-                # Method 2: direct load with auto prefix detection
-                model_keys = set(model.state_dict().keys())
-                ckpt_keys = set(state.keys())
-                direct_match = len(model_keys & ckpt_keys)
+            else:
+                log(f"WARNING: Only {loaded_count} params matched — adapter load failed")
 
-                # Try adding base_model.model. prefix (PEFT saves without it)
-                prefixed = {f"base_model.model.{k}": v for k, v in state.items()}
-                prefix_match = len(model_keys & set(prefixed.keys()))
-
-                if prefix_match > direct_match and prefix_match > 100:
-                    state_to_load = prefixed
-                    log(f"Added 'base_model.model.' prefix: {prefix_match} keys match")
-                elif direct_match > 100:
-                    state_to_load = state
-                    log(f"Direct key match: {direct_match} keys")
-                else:
-                    # Try stripping prefix
-                    stripped = {}
-                    for k, v in state.items():
-                        nk = k.replace("base_model.model.", "", 1) if k.startswith("base_model.model.") else k
-                        stripped[nk] = v
-                    strip_match = len(model_keys & set(stripped.keys()))
-                    if strip_match > direct_match:
-                        state_to_load = stripped
-                        log(f"Stripped prefix: {strip_match} keys match")
-                    else:
-                        state_to_load = state
-                        log(f"No prefix strategy helped (direct={direct_match})")
-
-                # Move to GPU and load
-                state_to_load = {k: v.to(f"cuda:{LOCAL_RANK}") for k, v in state_to_load.items()}
-                incomp = model.load_state_dict(state_to_load, strict=False)
-                matched = len(state_to_load) - len(incomp.unexpected_keys)
-                log(f"FALLBACK ADAPTER LOAD: matched={matched}/{len(state_to_load)}, "
-                    f"unexpected={len(incomp.unexpected_keys)}")
-                if matched > 100:
-                    MANUAL_RESUME = True
-                    STEP_OFFSET = global_step
-                else:
-                    log(f"WARNING: Only {matched} keys matched — adapter load ineffective")
-
-            # Free temp state to reclaim memory
-            del state
+            del ckpt_state
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
         except Exception as e:
             log(f"WARNING: manual adapter load failed: {e}")
+            import traceback; traceback.print_exc()
             log("Falling back to native trainer resume")
     else:
         log(f"WARNING: no adapter weights found in {RESUME}")
