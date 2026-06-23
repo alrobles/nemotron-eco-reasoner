@@ -1,7 +1,8 @@
 # EcoReasoner Training Plan — KU HPC Cluster
 
-> Version: 1.0 | Date: 2026-06-22
+> Version: 1.1 | Date: 2026-06-22 | **Status: COMPLETED**
 > Based on 3rd place Kaggle solution (0.900) + VCDAD silver techniques
+> See [TRAINING_RESULTS.md](TRAINING_RESULTS.md) for final ablation results.
 
 ---
 
