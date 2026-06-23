@@ -291,22 +291,31 @@ if RESUME:
                 ckpt_state = torch.load(adapter_path, map_location="cpu")
             log(f"Loaded {len(ckpt_state)} tensors from {os.path.basename(adapter_path)}")
 
-            # Build key mapping: checkpoint uses stripped keys, model has full keys
-            # PEFT save_pretrained strips 'base_model.model.' prefix
+            # Build key mapping: PEFT save_pretrained strips adapter name (.default.)
+            # Checkpoint: base_model.model.backbone.layers.0.mixer.in_proj.lora_A.weight
+            # Model:      base_model.model.backbone.layers.0.mixer.in_proj.lora_A.default.weight
             model_params = dict(model.named_parameters())
             loaded_count = 0
             skipped = []
-            for ck, cv in ckpt_state.items():
-                # Try multiple key mappings
-                candidates = [
-                    ck,
-                    f"base_model.model.{ck}",
-                ]
-                if ck.startswith("base_model.model."):
-                    candidates.append(ck[len("base_model.model."):])
 
+            def _expand_key(k):
+                """Generate candidate model keys by inserting .default. for LoRA params."""
+                variants = [k]
+                for lora_part in ("lora_A.", "lora_B."):
+                    if lora_part in k and ".default." not in k:
+                        variants.append(k.replace(lora_part, f"{lora_part}default."))
+                result = []
+                for v in variants:
+                    result.append(v)
+                    if v.startswith("base_model.model."):
+                        result.append(v[len("base_model.model."):])
+                    else:
+                        result.append(f"base_model.model.{v}")
+                return result
+
+            for ck, cv in ckpt_state.items():
                 matched_key = None
-                for mk in candidates:
+                for mk in _expand_key(ck):
                     if mk in model_params:
                         matched_key = mk
                         break
