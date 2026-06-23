@@ -110,14 +110,15 @@ log(f"  lora_fp32={bool(LORA_FP32)}, completion_only={bool(COMPLETION_ONLY)}, lm
 # --------------------------------------------------------------------------- model
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-tok = AutoTokenizer.from_pretrained(M, trust_remote_code=True)
+tok = AutoTokenizer.from_pretrained(M, trust_remote_code=True, local_files_only=True)
 if tok.pad_token is None:
     tok.pad_token = tok.eos_token
 
 t0 = time.time()
 model = AutoModelForCausalLM.from_pretrained(
     M, trust_remote_code=True, dtype=torch.bfloat16,
-    device_map={"": LOCAL_RANK}, low_cpu_mem_usage=True)
+    device_map={"": LOCAL_RANK}, low_cpu_mem_usage=True,
+    local_files_only=True)
 model.config.use_cache = False
 log(f"MODEL LOADED in {time.time()-t0:.0f}s on cuda:{LOCAL_RANK} "
     f"{torch.cuda.get_device_name(LOCAL_RANK)}")
@@ -269,7 +270,91 @@ RESUME = os.path.dirname(ckpts[-1]) if ckpts else None
 global_step = json.load(open(ckpts[-1])).get("global_step", 0) if ckpts else 0
 batch_steps = min(STEPS_PER_JOB, TARGET_TOTAL - global_step)
 target_step = global_step + batch_steps
-log(f"RESUME step {global_step} -> {target_step}" if RESUME else f"FRESH START -> {target_step}")
+
+# Manual adapter load: bypass PEFT's broken resume_from_checkpoint path
+# (avoids WeightConverter 'distributed_operation' TypeError in PEFT + torch nightly)
+# Strategy: direct parameter-level copy — bypasses ALL PEFT loading machinery
+MANUAL_RESUME = False
+STEP_OFFSET = 0
+if RESUME:
+    adapter_sf = os.path.join(RESUME, "adapter_model.safetensors")
+    adapter_bin = os.path.join(RESUME, "adapter_model.bin")
+    adapter_path = adapter_sf if os.path.exists(adapter_sf) else (
+        adapter_bin if os.path.exists(adapter_bin) else None)
+    if adapter_path:
+        try:
+            # Load checkpoint to CPU (avoid doubling GPU memory)
+            if adapter_path.endswith(".safetensors"):
+                from safetensors.torch import load_file
+                ckpt_state = load_file(adapter_path, device="cpu")
+            else:
+                ckpt_state = torch.load(adapter_path, map_location="cpu")
+            log(f"Loaded {len(ckpt_state)} tensors from {os.path.basename(adapter_path)}")
+
+            # Build key mapping: PEFT save_pretrained strips adapter name (.default.)
+            # Checkpoint: base_model.model.backbone.layers.0.mixer.in_proj.lora_A.weight
+            # Model:      base_model.model.backbone.layers.0.mixer.in_proj.lora_A.default.weight
+            model_params = dict(model.named_parameters())
+            loaded_count = 0
+            skipped = []
+
+            def _expand_key(k):
+                """Generate candidate model keys by inserting .default. for LoRA params."""
+                variants = [k]
+                for lora_part in ("lora_A.", "lora_B."):
+                    if lora_part in k and ".default." not in k:
+                        variants.append(k.replace(lora_part, f"{lora_part}default."))
+                result = []
+                for v in variants:
+                    result.append(v)
+                    if v.startswith("base_model.model."):
+                        result.append(v[len("base_model.model."):])
+                    else:
+                        result.append(f"base_model.model.{v}")
+                return result
+
+            for ck, cv in ckpt_state.items():
+                matched_key = None
+                for mk in _expand_key(ck):
+                    if mk in model_params:
+                        matched_key = mk
+                        break
+
+                if matched_key is not None:
+                    param = model_params[matched_key]
+                    param.data.copy_(cv.to(param.device, dtype=param.dtype))
+                    loaded_count += 1
+                else:
+                    skipped.append(ck)
+
+            log(f"DIRECT PARAM COPY from {os.path.basename(RESUME)}: "
+                f"{loaded_count}/{len(ckpt_state)} tensors loaded")
+            if skipped:
+                log(f"  skipped {len(skipped)} keys (first 3: {skipped[:3]})")
+            if loaded_count > 100:
+                MANUAL_RESUME = True
+                STEP_OFFSET = global_step
+            else:
+                log(f"WARNING: Only {loaded_count} params matched — adapter load failed")
+
+            del ckpt_state
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        except Exception as e:
+            log(f"WARNING: manual adapter load failed: {e}")
+            import traceback; traceback.print_exc()
+            log("Falling back to native trainer resume")
+    else:
+        log(f"WARNING: no adapter weights found in {RESUME}")
+
+if MANUAL_RESUME:
+    log(f"MANUAL RESUME step {global_step} -> {target_step} (offset={STEP_OFFSET})")
+    RESUME = None  # disable native resume since we loaded weights manually
+elif RESUME:
+    log(f"NATIVE RESUME step {global_step} -> {target_step}")
+else:
+    log(f"FRESH START -> {target_step}")
 
 # --------------------------------------------------------- staged freeze callback
 from transformers import TrainerCallback
@@ -311,14 +396,16 @@ class TwoPhaseCallback(TrainerCallback):
     Phase 1: high LR, no gradient clipping
     Phase 2: low LR (nudge), gradient clipping ON, cosine schedule
     """
-    def __init__(self, nudge_start, nudge_lr, phase1_lr):
+    def __init__(self, nudge_start, nudge_lr, phase1_lr, step_offset=0):
         self.nudge_start = nudge_start
         self.nudge_lr = nudge_lr
         self.phase1_lr = phase1_lr
+        self.step_offset = step_offset
         self.switched = False
 
     def on_step_begin(self, args, state, control, **kw):
-        if not self.switched and state.global_step >= self.nudge_start:
+        real_step = state.global_step + self.step_offset
+        if not self.switched and real_step >= self.nudge_start:
             self.switched = True
             # Switch to nudge LR
             optimizer = kw.get("optimizer")
@@ -335,7 +422,7 @@ class TwoPhaseCallback(TrainerCallback):
                 print(f"{'='*60}\n", flush=True)
         return control
 
-callbacks.append(TwoPhaseCallback(nudge_start, NUDGE_LR, LR))
+callbacks.append(TwoPhaseCallback(nudge_start, NUDGE_LR, LR, step_offset=STEP_OFFSET))
 log(f"Two-phase: Phase1 steps 0-{nudge_start}, Phase2 steps {nudge_start}-{TARGET_TOTAL}")
 
 # ------------------------------------------------------------------- SFT training
@@ -344,9 +431,16 @@ from trl import SFTTrainer, SFTConfig
 warmup_steps = min(30, max(1, target_step // 10))
 eff_batch = 1 * GRAD_ACCUM * WORLD_SIZE
 
+# When using manual resume, train for batch_steps only (trainer starts from step 0)
+cfg_max_steps = batch_steps if MANUAL_RESUME else target_step
+# Use a sub-directory for Phase 2 intermediate checkpoints to avoid overwriting Phase 1
+cfg_output_dir = os.path.join(OUT, f"phase2_from_{global_step}") if MANUAL_RESUME else OUT
+if MANUAL_RESUME:
+    os.makedirs(cfg_output_dir, exist_ok=True)
+
 cfg = SFTConfig(
-    output_dir=OUT,
-    max_steps=target_step,
+    output_dir=cfg_output_dir,
+    max_steps=cfg_max_steps,
     per_device_train_batch_size=1,
     gradient_accumulation_steps=GRAD_ACCUM,
     learning_rate=LR,
@@ -369,9 +463,9 @@ cfg = SFTConfig(
     weight_decay=0.0,
     max_grad_norm=1e9,  # Phase 1: clipping OFF (from VCDAD silver solution)
     neftune_noise_alpha=NEFTUNE_ALPHA,  # NEFTune embedding noise (from VCDAD)
-    use_liger_kernel=True,
+    use_liger_kernel=False,  # liger may not be installed in all venvs
     ddp_find_unused_parameters=True,
-    dataloader_num_workers=2,
+    dataloader_num_workers=0,  # 0 avoids /dev/shm Bus error on HPC nodes
     seed=42,
 )
 
@@ -413,7 +507,15 @@ log(f"  Phase2: lr={NUDGE_LR}, clipping=1.0, steps {nudge_start}-{TARGET_TOTAL}"
 log(f"  NEFTune alpha={NEFTUNE_ALPHA}")
 
 t0 = time.time()
-trainer.train(resume_from_checkpoint=RESUME)
+try:
+    trainer.train(resume_from_checkpoint=RESUME)
+except TypeError as e:
+    if "distributed_operation" in str(e) or "WeightConverter" in str(e):
+        log(f"PEFT resume bug hit: {e}")
+        log("Native resume failed — use manual adapter load (already handled above).")
+        log("If this fires, the manual load path was skipped. Aborting.")
+        sys.exit(1)
+    raise
 elapsed = (time.time() - t0) / 60
 final_loss = next((e["loss"] for e in reversed(trainer.state.log_history) if "loss" in e), "?")
 log(f"DONE {elapsed:.1f}min loss={final_loss}")
