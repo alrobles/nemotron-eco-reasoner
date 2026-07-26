@@ -160,7 +160,7 @@ def train(args):
 
     model = EDSR(in_channels=2, out_channels=1, n_feats=args.n_feats,
                  n_resblocks=args.n_resblocks).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.decay_every, gamma=0.5)
 
     os.makedirs(args.out_dir, exist_ok=True)
