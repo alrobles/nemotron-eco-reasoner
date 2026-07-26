@@ -81,7 +81,12 @@ class GeoDataset(Dataset):
         self.mask = (
             np.isfinite(self.lr) & np.isfinite(self.dem) &
             np.isfinite(self.hr)
-        )
+        ).astype(np.float32)
+
+        # Replace NaNs with 0 so convolutions are well-defined; keep mask channel
+        self.lr = np.where(np.isfinite(self.lr), self.lr, 0.0)
+        self.dem = np.where(np.isfinite(self.dem), self.dem, 0.0)
+        self.hr = np.where(np.isfinite(self.hr), self.hr, 0.0)
         # Compute valid top-left corners for patches
         h, w = self.hr.shape
         ps = patch_size
@@ -109,9 +114,9 @@ class GeoDataset(Dataset):
         lr = self.lr[i:i+ps, j:j+ps]
         dem = self.dem[i:i+ps, j:j+ps]
         hr = self.hr[i:i+ps, j:j+ps]
-        mask = self.mask[i:i+ps, j:j+ps].astype(np.float32)
+        mask = self.mask[i:i+ps, j:j+ps]
 
-        x = np.stack([lr, dem], axis=0)
+        x = np.stack([lr, dem, mask], axis=0)
         y = hr[np.newaxis, ...]
 
         if self.augment:
@@ -134,7 +139,7 @@ class GeoDataset(Dataset):
 
 def masked_l1_loss(pred, target, mask):
     diff = torch.abs(pred - target)
-    diff = diff * mask
+    diff = torch.where(mask.bool(), diff, torch.zeros_like(diff))
     return diff.sum() / mask.sum().clamp_min(1.0)
 
 
@@ -158,7 +163,7 @@ def train(args):
     dl_val = DataLoader(ds_val, batch_size=args.batch_size, shuffle=False,
                         num_workers=args.num_workers, pin_memory=True)
 
-    model = EDSR(in_channels=2, out_channels=1, n_feats=args.n_feats,
+    model = EDSR(in_channels=3, out_channels=1, n_feats=args.n_feats,
                  n_resblocks=args.n_resblocks).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.decay_every, gamma=0.5)
